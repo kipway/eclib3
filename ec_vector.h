@@ -79,7 +79,7 @@ namespace ec
 			}
 		};
 
-		vector& operator = (const vector& v) // for move
+		vector& operator = (const vector& v)
 		{
 			clear();
 			append(v.data(), v.size());
