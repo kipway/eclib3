@@ -2,7 +2,7 @@
 \file ec_service.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
 service frame for windows and Linux
 
@@ -12,11 +12,9 @@ source repository : https://github.com/kipway/eclib
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 
-简介：
-支持windows/linux的后台服务服务框架。
-定义_DEBUG 宏时编译为前台命令行版方便调试，否则编译为后台服务程序。
 
-用法：
+usage：
+
 #include "ec_system.h"
 #include "ec_service.h"
 

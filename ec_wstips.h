@@ -2,26 +2,20 @@
 \file ec_wstips.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-eclib websocket secret class. easy to use, no thread , lock-free
+functions used by websocket
 
-class tcp::ws_session
-class tcp::httpserver;
+send frame size : 62K
+read frame size : 4M
+read package size: 32M
+compress extended: permessage_deflate(google chrome,firefox) and x_webkit_deflate_frame(Safari)
 
-eclib 3.0 Copyright (c) 2017-2018, kipway
+eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-websocket的辅助函数和对象。
-
-发送时为了照顾Safari浏览器frame大小设置为62K
-接收时默认设置为 frame大小4M，package大小32M，可再应用层根据情况覆盖这两个宏定义。
-
-压缩支持 permessage_deflate(google chrome,firefox) 和 x_webkit_deflate_frame(废弃标准Safari)
 */
 #pragma once
 #include "zlib/zlib.h"
@@ -61,7 +55,7 @@ websocket的辅助函数和对象。
 namespace ec
 {
 	template <class _Out>
-	inline int ws_encode_zlib(const void *pSrc, size_t size_src, _Out* pout)//pout first two byte x78 and x9c,the end  0x00 x00 xff xff, no  adler32
+	int ws_encode_zlib(const void *pSrc, size_t size_src, _Out* pout)//pout first two byte x78 and x9c,the end  0x00 x00 xff xff, no  adler32
 	{
 		z_stream stream;
 		int err;
@@ -99,7 +93,7 @@ namespace ec
 	}
 
 	template <class _Out>
-	inline int ws_decode_zlib(const void *pSrc, size_t size_src, _Out* pout)//pSrc begin with 0x78 x9c, has no end 0x00 x00 xff xff
+	int ws_decode_zlib(const void *pSrc, size_t size_src, _Out* pout)//pSrc begin with 0x78 x9c, has no end 0x00 x00 xff xff
 	{
 		z_stream stream;
 		int err;
@@ -136,7 +130,7 @@ namespace ec
 	}
 
 	template <class _Out>
-	inline bool ws_make_permsg(const void* pdata, size_t sizes, unsigned char wsopt, _Out* pout, int ncompress, uint32_t umask = 0) //multi-frame,permessage_deflate
+	bool ws_make_permsg(const void* pdata, size_t sizes, unsigned char wsopt, _Out* pout, int ncompress, uint32_t umask = 0) //multi-frame,permessage_deflate
 	{
 		unsigned char uc;
 		const uint8_t* pds = (const uint8_t*)pdata;
@@ -199,7 +193,7 @@ namespace ec
 	}
 
 	template <class _Out>
-	inline bool ws_make_perfrm(const void* pdata, size_t sizes, unsigned char wsopt, _Out* pout, uint32_t umask = 0)//multi-frame,deflate-frame, for ios safari
+	bool ws_make_perfrm(const void* pdata, size_t sizes, unsigned char wsopt, _Out* pout, uint32_t umask = 0)//multi-frame,deflate-frame, for ios safari
 	{
 		const uint8_t* pds = (const uint8_t*)pdata;
 		uint8_t* pf;

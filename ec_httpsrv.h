@@ -3,20 +3,16 @@
 
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.31
+\update 2020.9.6
 
-eclib http/https server class. easy to use, no thread , lock-free. Support tcp/tls, http/https, ws/wss protocol
-
-class ec::httpsrv;
+httpsrv
+	class for http/https server
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-对ec::net::server做了一些http处理扩展，支持http/https,ws/wss的服务端从这个类扩展。
 */
 #pragma once
 

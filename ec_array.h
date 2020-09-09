@@ -2,11 +2,10 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.31
+\update 2020.9.6
 
-eclib class array for trivially_copyable type
-
-class array
+array
+	a extended array class for trivially copyable type
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
@@ -14,23 +13,28 @@ source repository : https://github.com/kipway
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 
-简介：
-这是一个同时具备 array, vector, string, stack, stream的功能的模板类, 其中的stream操作支持little_endian和big_endian模式的流输入输出操作。
-模板参数限定为 trivially_copyable类型便于使用memcpy等快速操作。准确的说是一个capacity()大小固定的ec::vector。
+Description：
+ec::array is not same as std::array. it's like a vector with fixed-size capacity.And expanded some functions, can be used as string, stack, stream
 
-迭代器：Random-access iterators, 可使用std::sort, std::for_each和 C++11的for循环等在使用迭代器的方法操作本集合。
+iterator: a random access iterator to value_type
 
-ec::array没有依赖,可以单独提出去使用。
+remark：
 
-注意事项：
-1. ec::array::size()返回当前实际存储的元素个数，而和std::array::size()始终为_Num。
+size_type size() const;
+Returns the number of elements in the array.
+This is the number of actual objects held in the array, which is not necessarily equal to its storage capacity.
 
-用法例子:
-using modbusfrm = ec::array<uint8_t,264>; //定义一个modbus报文处理流对象。
-using str256 = ec::array<char,256>; //定义一个最大空间256字节的string对象, 支持大部分的std::string的方法。
+size_type max_size() noexcept;
+Return maximum size
+Returns the maximum number of elements that the array container can hold.
+The max_size of an array object, just like its size, is always equal to the second template parameter used to instantiate the array template class.
 
-主要用途：
-主要用于预知空间的栈内临时对象集合。也可用在对象成员同对象一起在远堆构造时分配内存。
+size_type capacity() const;
+same as max_size();
+
+demo:
+using modbusfrm = ec::array<uint8_t,264>;
+using str256 = ec::array<char,256>;
 */
 #pragma once
 #include <stdint.h>

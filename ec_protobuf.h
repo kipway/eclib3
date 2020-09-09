@@ -2,25 +2,15 @@
 \file ec_protobuf.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-eclib class base_protobuf ,parse google protocol buffer
-
-class base_protobuf;
-class msg_protoc3;
-class cls_protoc3
+classes to encode/decode google protocol buffer,support proto3
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-这是一个快速而简介的轻量化的google protocol buffer编码解码库，支持proto3规范，并支持简单类型紧凑数组
-比如 repeated int32 data = 16 [packed = true] 这样的编码/解码。在多个工程应用过，和google工具生成的
-代码编码/解码双向兼容。
-无任何其他依赖,可以单独提出来使用，使用例子参见github项目 https://github.com/kipway/ec_protobuf
 */
 
 #pragma once
@@ -282,7 +272,7 @@ namespace ec
 		{
 		}
 
-		inline bool p_bytes(uint32_t wire_type, const uint8_t* &pd, int &len, void* pout, size_t &outlen) const
+		bool p_bytes(uint32_t wire_type, const uint8_t* &pd, int &len, void* pout, size_t &outlen) const
 		{
 			size_t tmpsize = 0;
 			const uint8_t* ptmp = nullptr;
@@ -293,7 +283,7 @@ namespace ec
 			return tmpsize <= outlen;
 		}
 
-		inline bool p_str(uint32_t wire_type, const uint8_t* &pd, int &len, char* pout, size_t outlen) const
+		bool p_str(uint32_t wire_type, const uint8_t* &pd, int &len, char* pout, size_t outlen) const
 		{
 			size_t tmpsize = 0;
 			const uint8_t* ptmp = nullptr;
@@ -305,13 +295,13 @@ namespace ec
 			return tmpsize < outlen;
 		}
 
-		bool p_cls(uint32_t wire_type, const uint8_t* &pd, int &len, const uint8_t* &p, size_t &size) const  // no copy
+		inline bool p_cls(uint32_t wire_type, const uint8_t* &pd, int &len, const uint8_t* &p, size_t &size) const  // no copy
 		{
 			return (pb_length_delimited == wire_type && get_length_delimited(pd, len, p, size));
 		}
 
 		template< class _Out>
-		inline bool p_cls(uint32_t wire_type, const uint8_t* &pd, int &len, _Out* pout) const
+		bool p_cls(uint32_t wire_type, const uint8_t* &pd, int &len, _Out* pout) const
 		{
 			size_t tmpsize = 0;
 			const uint8_t* ptmp = nullptr;
@@ -343,13 +333,13 @@ namespace ec
 		}
 
 		template<class _Tp>
-		bool p_fixed32(uint32_t wire_type, const uint8_t* &pd, int &len, _Tp &out) const
+		inline bool p_fixed32(uint32_t wire_type, const uint8_t* &pd, int &len, _Tp &out) const
 		{
 			return pb_fixed32 == wire_type && 4u == sizeof(out) && get_fixed(pd, len, out);
 		}
 
 		template<class _Tp>
-		bool p_fixed64(uint32_t wire_type, const uint8_t* &pd, int &len, _Tp &out) const
+		inline bool p_fixed64(uint32_t wire_type, const uint8_t* &pd, int &len, _Tp &out) const
 		{
 			return pb_fixed64 == wire_type && 8u == sizeof(out) && get_fixed(pd, len, out);
 		}
@@ -400,7 +390,7 @@ namespace ec
 		template<class _Tp
 			, class _Out
 			, class = typename std::enable_if<std::is_arithmetic<_Tp>::value && sizeof(_Tp) == 4u>::type >
-			bool out_fixed32(_Out* po, int id, _Tp v) const
+			inline bool out_fixed32(_Out* po, int id, _Tp v) const
 		{
 			return out_key(id, pb_fixed32, po) && base_protobuf::out_fixed32(v, po);
 		}
@@ -408,7 +398,7 @@ namespace ec
 		template<class _Tp
 			, class _Out
 			, class = typename std::enable_if<std::is_arithmetic<_Tp>::value && sizeof(_Tp) == 8u>::type >
-			bool out_fixed64(_Out* po, int id, _Tp v) const
+			inline bool out_fixed64(_Out* po, int id, _Tp v) const
 		{
 			return out_key(id, pb_fixed64, po) && base_protobuf::out_fixed64(v, po);
 		}

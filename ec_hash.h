@@ -2,18 +2,15 @@
 \file ec_hash.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-eclib hash class for c11_map.h
+hash class for hashmap
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-hash函数集，主要被ec_map.h中的hashmap使用
 */
 
 #pragma once

@@ -2,26 +2,22 @@
 \file ec_log.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.30
+\update 2020.9.6
 
-class ilog;
+ilog
+	A client log base class
+
+udplog
+	a client log class, send logs to UDP server
+
+prtlog
+	a client log class, print logs to terminal
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-这是eclib使用的日志类。
-ilog是基类，可以在应用层扩展自己实现一个。
-
-这里提供两个实现,udplog和prtlog
-udplog是从ilog扩展的日志类，将日志通过udp传输到eclib提供的logsrv日志服务器里。
-使用logsrv的混仓存贮模式，可以看出多个应用之间的协作关系和流程，更可以保证应用输出的日志不因自己崩溃而导
-致日志没落地的问题，便于分析问题。
-
-prtlog是打印到当前终端的简易日志类，可用于简单调试使用。
 */
 #pragma once
 #include <stdarg.h>

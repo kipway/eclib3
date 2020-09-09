@@ -5,17 +5,13 @@
 
 \adaptation jiangyong
 \email  kipway@outlook.com
+\update 2020.9.6
 
 MODP_B64 - High performance base64 encoder/decoder
 Version 1.3 -- 17-Mar-2006
 http://modp.com/release/base64
 
 fix: decode_base64_le bug in BusyBox Linux ARM system by kipway 2018.3.7
-
-简介：
-Nick Galbreath 写的查表法的base64编码解码经测试的确是最快的，chromium的V8也是使用这个版本。
-为了便于使用, 我将它改变为一个h文件，并修正了在嵌入式linux下一个不兼容的BUG.
-
 */
 #ifndef C_BASE64_H
 #define C_BASE64_H

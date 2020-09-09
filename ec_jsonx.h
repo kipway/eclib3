@@ -2,20 +2,16 @@
 \file ec_jsonx.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.31
+\update 2020.9.6
 
-eclibe fast json parse class, no copy
+json
+	a fast json parse class
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介:
-这是一个无依赖的可以提出去单独使用的json解析类。
-扫描一遍，不拷贝内容，最快的json解析类。解析前保证json字符串里没有注释。
-
 */
 #pragma once
 #include <string.h>

@@ -2,18 +2,15 @@
 \file ec_netio.h
 \author	jiangyong
 \email  kipway@outlook.com
-update 2020.8.29
+update 2020.9.6
 
-eclibe NETIO for windows & linux
+functions for NET IO
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway/eclib
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-网络IO的一些工具类函数。
 */
 #pragma once
 
@@ -57,6 +54,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 
 #endif
 
+#include <type_traits>
 namespace ec
 {
 	namespace net {
@@ -354,7 +352,7 @@ namespace ec
 
 		template<typename SCK
 			, class = typename std::enable_if<std::is_same<SCK, SOCKET>::value>::type>
-			inline int send_non_block(SCK s, const void* pbuf, int nsize)//return send bytes size or -1 for error,use for nonblocking
+			int send_non_block(SCK s, const void* pbuf, int nsize)//return send bytes size or -1 for error,use for nonblocking
 		{
 			int  nret;
 #ifdef _WIN32

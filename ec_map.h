@@ -2,40 +2,17 @@
 \file ec_hashmap.h
 \author jiangyong
 \email  kipway@outlook.com
-\update 2020.9.2
+\update 2020.9.6
 
-eclib hashmap
-
-class ec::hashmap;
+hashmap
+	A hash map class, incompatible with std::unordered_map.
+	iterator:	a forward iterator to value_type(not pair for key-val).
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-这是一个hashmap，是C++11中 unordered_map的替代品，非兼容替代。
-
-迭代器： forward iterator
-
-为什么要自造一个轮子？
-当然是为了效率，和标准库有两点不同：
-1)在使用map的时候，大部分的map元素都是一个结构体或者对象，而key就在map元素中，完全没有必要为每一个元素创建一个key-val的pair对象。
-2)内置一个精确内存预分配器，预先分配段连续内存，可容纳元素的个数为hash桶的个数+8,默认桶为1024个。超过预分配空间后还是会从系统远堆
-分配内存，所以合理预估元素个数，确定桶的个数可进一步提升hashmap的插入和访问效率。
-
-特点：
-ec::hashmap中的元素除了可以是结构体，对象外，还可以是指针，在删除，覆盖节点时并可提自定义指针的删除操作(默认不释放)。
-
-典型的三种场景：
-1)元素是对象: 则清理工作在对象的析构函数中，map在删除对象时会调用析构函数。
-2)元素是结构体: 当作对象处理,如果里面有需要释放的指针需要指定模板的_DelVal参数，默认是不释放的。
-3)元素是指针: 如果需要释放,则需要指定模板的_DelVal参数，默认是不释放的。
-
-注意事项：
-因为存储key-val的方法不一样，用法不兼容标准库，使用迭代器是访问的是val非key-val的pair，参见下面注释中的的例子。
-
 */
 
 #pragma once

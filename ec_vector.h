@@ -2,28 +2,16 @@
 \file ec_vector.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-eclib class vector for trivially_copyable type
-
-class vector;
+vector
+	a extend vector class for trivially copyable type, and expanded some functions, can be used as string, stack, stream
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-和标准库的vector用法基本一直，大部分接口函数兼容，不能替代标准库的vector。
-ec::vector限制了模板参数为trivially_copyable类型，以便使用memcpy,memmove等高效的内存操作。
-
-扩展后同时具备 vector, string, stack, stream的功能, 其中的stream操作支持little_endian和big_endian模式的流输入输出操作。
-
-迭代器：Random-access iterators, 可使用std::sort, std::for_each和 C++11的for循环等在使用迭代器的方法操作本集合。
-
-不同于标准库在造型定义时指定内存分配器，ec::vector在构造对象时指定内存分配器，可以指定ec::memory对象指针为内存分配器，默认
-不指定使用C库的malloc和free。
 */
 #pragma once
 #include <stdint.h>

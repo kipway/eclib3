@@ -2,26 +2,15 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.30
+\update 2020.9.6
 
-eclib string tips
-
-class string,bytes and strxxx
+string , bytes and string functions
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-字符串操作，utf8编码转换。
-
-std::bytes 存储字节流的标准库。
-ec::bytes eclib的字节流对象。
-ec::string eclib的string对象。
-
-请无视像strlcpy这样的函数也写成模板，只是为了不用inline , static, Unnamed namespaces将全局函数写在h文件里。
 */
 
 #pragma once

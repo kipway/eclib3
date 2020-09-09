@@ -4,22 +4,17 @@
 \author unkown
 \editor jiangyong
 \email  kipway@outlook.com
-\update 2020.2.29
+\update 2020.9.6
 
-eclib md5 encode tooltips.
+functions:
+	encode_md5
+	encodestr_md5
 
-class cMd5;
-
-eclib Copyright (c) 2017-2020, kipway
+eclib3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-
-简介：
-原作者不祥，为方便使用，Kipway改变在一个h文件里include后即可使用。
-
 */
 
 #pragma once

@@ -2,23 +2,17 @@
 \file ec_wssclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-websocket base HTTPS(TLS1.2)
-
-class ec::wss_c
+wss_c
+	a Client websocket class based on HTTPS (TLS1.2)
+	tcp_c -> tls_c -> wss_c
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-基于TLS1.2的websocket客户端对象。
-
-类结构:
-tcp_c -> tls_c -> wss_c
 */
 #pragma once
 #include "ec_tlsclient.h"

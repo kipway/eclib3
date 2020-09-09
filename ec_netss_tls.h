@@ -2,27 +2,22 @@
 \file ec_netsrv_tls.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.2
+\update 2020.9.6
 
-eclib net server tls session class
+net::session_tls
+	TLS1.2 session.
 
-class ec::net::session_tls;
+	Supported cipher suites:
+	CipherSuite TLS_RSA_WITH_AES_128_CBC_SHA256 = { 0x00,0x3C };
+	CipherSuite TLS_RSA_WITH_AES_256_CBC_SHA256 = { 0x00,0x3D };
+	CipherSuite TLS_RSA_WITH_AES_128_CBC_SHA = {0x00,0x2F};
+	CipherSuite TLS_RSA_WITH_AES_256_CBC_SHA = {0x00,0x35};
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-tls1.2协议的接入会话。
-
-密码套件支持4种：
-
-CipherSuite TLS_RSA_WITH_AES_128_CBC_SHA256 = { 0x00,0x3C };
-CipherSuite TLS_RSA_WITH_AES_256_CBC_SHA256 = { 0x00,0x3D };
-CipherSuite TLS_RSA_WITH_AES_128_CBC_SHA = {0x00,0x2F};
-CipherSuite TLS_RSA_WITH_AES_256_CBC_SHA = {0x00,0x35};
 */
 
 #pragma once

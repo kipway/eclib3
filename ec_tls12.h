@@ -2,31 +2,31 @@
 \file ec_tls12.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-eclib TLS1.2(rfc5246)  class
+TLS1.2(rfc5246)  session class
+
 support:
 CipherSuite TLS_RSA_WITH_AES_128_CBC_SHA256 = { 0x00,0x3C };
 CipherSuite TLS_RSA_WITH_AES_256_CBC_SHA256 = { 0x00,0x3D };
 
-will add MAC secrets = 20byte
 CipherSuite TLS_RSA_WITH_AES_128_CBC_SHA = {0x00,0x2F};
 CipherSuite TLS_RSA_WITH_AES_256_CBC_SHA = {0x00,0x35};
 
-class ec::tls_session;
-class ec::tls_session_cli;
-class ec::tls_session_srv;
+tls_session
+	session base class
+
+tls_session_cli
+	session class for client
+
+tls_session_srv
+	session class for server
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-TLS1.2(RFC5246)服务端和客户端会话实现，支持上面列举的4个密码套件。
-使用了openssl的密码库 libeay32.lib。
-用于HTTPS和WSS通信。
 */
 #pragma once
 
@@ -79,7 +79,7 @@ TLS1.2(RFC5246)服务端和客户端会话实现，支持上面列举的4个密�
 namespace ec
 {
 	template<class _Out>
-	inline bool get_cert_pkey(const char* filecert, _Out* pout)//get ca public key
+	bool get_cert_pkey(const char* filecert, _Out* pout)//get ca public key
 	{
 		uint8_t stmp[8192];
 		FILE* pf = fopen(filecert, "rb");

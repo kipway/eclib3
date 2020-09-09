@@ -2,20 +2,16 @@
 \file ec_event.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-eclib event use c++11 condition_variable
-
-class cEvent;
+cEvent
+	event class use c++11 condition_variable
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-使用C++11的条件变量实现的事件信号。用于基于事件触发的线程使用。
 */
 #pragma once
 #include <mutex>

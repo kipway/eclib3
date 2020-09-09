@@ -2,18 +2,16 @@
 \file ec_daemon.h
 \author	jiangyong
 \author kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-eclib template class  for linux daemon server
+daemon
+	a class  for linux daemon server
 
-eclib 2.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-linux下使用的后台服务进程框架。被ec_srevice.h中使用
 */
 
 #pragma once

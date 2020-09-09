@@ -2,21 +2,16 @@
 \file ec_tcpclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-tcp client, support socks5 proxy
-
-class ec::tcp_c
+tcp_c
+	a class for tcp client, support socks5 proxy, asynchronous connection
 
 eclib 3.0 Copyright (c) 2017-2030, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-tcp的客户端基类。
-异步方式连接，支持socks5代理连接。
 */
 #pragma once
 #include <stdint.h>

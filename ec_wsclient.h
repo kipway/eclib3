@@ -2,22 +2,17 @@
 \file ec_wsclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-websocket base HTTP
-class ec::ws_c
+ws_c
+	class for websocket client
+	tcp_c -> ws_c
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-websocket客户端对象。
-
-类结构:
-tcp_c -> ws_c
 */
 #pragma once
 #include "ec_log.h"

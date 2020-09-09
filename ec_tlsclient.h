@@ -2,7 +2,7 @@
 \file ec_tlsclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
 TLS1.2(rfc5246)
 support:
@@ -13,19 +13,15 @@ will add MAC secrets = 20byte
 CipherSuite TLS_RSA_WITH_AES_128_CBC_SHA = {0x00,0x2F};
 CipherSuite TLS_RSA_WITH_AES_256_CBC_SHA = {0x00,0x35};
 
-class ec::tls_c
+tls_c
+	client TLS1.2 session class
+	tcp_c -> tls_c
 
 eclib 3.0 Copyright (c) 2017-2019, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-TLS1.2(RFC5246)的客户端.
-
-类结构:
-tcp_c -> tls_c
 */
 #pragma once
 #include "ec_tls12.h"

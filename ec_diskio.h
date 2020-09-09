@@ -2,21 +2,19 @@
 \file ec_diskio.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-eclib disk io tools, use utf8 encode
+io
+	tools for disk IO，use utf-8 parameters
 
-class cdir;
+cdir
+	class for file and directory search.
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-磁盘文件操作的一些工具函数集合，文件，目录等参数使用utf8编码。在Windows下会将utf8编码的参数转换为wchar_t的unicode,
-在Linux下不做任何转换，因此要求Linux下系统字符编码为utf-8(一般linux系统默认安装就是)
 */
 
 #pragma once

@@ -2,20 +2,16 @@
 \file ec_netsrv_wss.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-eclib net server http/ws session class. easy to use, no thread , lock-free
-
-class ec::net::session_wss;
+net::session_wss
+	websocket over HTTPS(TLS1.2) session
 
 eclib 3.0 Copyright (c) 2017-2018, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-在tls1.2加密通道上的websocket协议接入会话。
 */
 #pragma once
 

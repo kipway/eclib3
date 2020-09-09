@@ -2,20 +2,15 @@
 \file ec_http.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.29
+\update 2020.9.6
 
-eclib class for parse http package
-
-class ec::http::package
+classes for HTTP protocol parse
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-http协议的一些工具类和函数。主要被ec_httpsrv.h和ec_wsclient.h使用
 */
 #pragma once
 #include <string.h>
@@ -118,7 +113,9 @@ namespace ec
 		constexpr int e_head = -7; // head item error
 		constexpr int e_bodysize = -8; // body size "Content-Length" error
 
-		bool isdir(const char* utf8name)
+		template<typename charT
+			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+			bool isdir(const charT* utf8name)
 		{
 #ifdef _WIN32
 			wchar_t wfile[512];
@@ -140,7 +137,10 @@ namespace ec
 			return false;
 #endif
 		}
-		const char *file_extname(const char*s)
+
+		template<typename charT
+			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+			const char *file_extname(const charT*s)
 		{
 			const char *pr = NULL;
 			while (*s) {
@@ -178,7 +178,9 @@ namespace ec
 			pout->push_back('\0');
 		}
 
-		bool char2hex(char c, unsigned char *pout)
+		template<typename charT
+			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+			bool char2hex(charT c, unsigned char *pout)
 		{
 			if (c >= 'a' && c <= 'f')
 				*pout = 0x0a + (c - 'a');
@@ -392,10 +394,10 @@ namespace ec
 
 			int long stoi() const // atoi()
 			{
-				char s[16];
+				char s[32];
 				if (!_s || !_size)
 					return 0;
-				size_t n = _size > 15 ? 15 : _size;
+				size_t n = _size > 31 ? 31 : _size;
 				memcpy(s, _s, n);
 				s[n] = 0;
 				return atoi(s);

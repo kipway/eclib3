@@ -2,32 +2,23 @@
 \file ec_netsrv_base.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.2
+\update 2020.9.6
 
-eclib net server session class.
+session class for net::server.
 
-class ec::net::session;
+net::session
+	base class
+
+UCID：Unique ID for the session
+1-49 listen ID
+50-999 connect out session ID
+>=1000 connect in session ID
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-
-非阻塞异步网络IO连接会话的基类 net::session,每个session带有一个最大 NET_SENDBUF_MAXSIZE字节
-的发送缓冲，未发送完成的暂存在缓冲里，由net::server的poll事件触发并发送，如果发送阻塞，缓冲满
-将会被net::server主动断开。如果一个session阻塞时间超过EC_NET_SEND_BLOCK_OVERSECOND秒也会被
-主动断开。NET_SENDBUF_MAXSIZE 默认64M， EC_NET_SEND_BLOCK_OVERSECOND默认10秒，可以在应用层
-覆盖这些定义。
-
-session分为接入和连出两种。无连接的udp没有session。
-
-ucid的分配：
-1-49为服务端listen端口的ID
-50-999 为连出的session ID
-1000以上为连入的ID
 */
 #pragma once
 

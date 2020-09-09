@@ -4,17 +4,14 @@
 \email  kipway@outlook.com
 \update 2020.8.31
 
-eclibe const text parse class
+txt
+	const text parse class
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介:
-文本扫描用辅助类，主要用于json的扫描.
-
 */
 #pragma once
 #include <stdlib.h>

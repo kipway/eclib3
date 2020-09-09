@@ -2,22 +2,16 @@
 \file ec_netsrv.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.2
+\update 2020.9.6
 
-eclib net::server class.
-
-class ec::net::server;
+net::server
+	a class for TCP/UDP, HTTP/HTTPS, WS/WSS
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-简介：
-网络IO服务端对象 net::server,支持http/https,ws/wss,tls1.2接入和自定义协议接入。
-内部管理了一个接入连接session(会话)hashmap，所有的session基于基类net::session扩展而来。每个session使用一个uint32_t标识，被称为ucid。
-为了方便跨平台，网络IO系统模型采用poll模型(windows对应为WSAPoll，windows server 2008开始支持)。
 */
 #pragma once
 
