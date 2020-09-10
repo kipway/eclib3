@@ -78,12 +78,6 @@ namespace ec {
 				_append((const value_type*)s, strlen(s));
 		}
 
-		array& operator = (const array& v)
-		{
-			clear();
-			_append(v.data(), v.size());
-			return *this;
-		}
 	protected:
 		size_type _size; // current items
 		size_type _pos;    // stream byte position for read/write
