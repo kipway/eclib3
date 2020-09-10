@@ -2,7 +2,7 @@
 \file ec_diskio.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.10
 
 io
 	tools for disk IO，use utf-8 parameters
@@ -62,7 +62,22 @@ namespace ec
 				return nullptr;
 			return _wfopen(sfile, smode);
 #else
-			return fopen(utf8file, utf8mode);
+			return ::fopen(utf8file, utf8mode);
+#endif
+		}
+
+		template<typename charT
+			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+			int remove(const charT* utf8filename)
+		{
+#ifdef _WIN32
+			wchar_t sfile[512];
+			sfile[0] = 0;
+			if (!MultiByteToWideChar(CP_UTF8, 0, utf8filename, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
+				return -1;
+			return ::_wremove(sfile);
+#else
+			return ::remove(utf8filename);
 #endif
 		}
 
