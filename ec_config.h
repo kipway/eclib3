@@ -133,7 +133,7 @@ namespace ec
 							stmp[np++] = c;
 					}
 				}
-				else if (c == '\n') {
+				else if (c == '\n' || c == '\r') {
 					stmp[np] = 0;
 					if (0 != (nerr = fun(nr, nc, stmp, true)))
 						break;
@@ -224,7 +224,7 @@ namespace ec
 					blk.clear();
 					while ((c = pf->getc()) != EOF) {
 						so += c;
-						if (']' == c || '\n' == c)
+						if (']' == c || '\n' == c || '\r' == c)
 							break;
 						blk += c;
 					}
@@ -234,7 +234,7 @@ namespace ec
 					if (!key.empty() && fun(blk, key, newv)) {
 						so += newv;
 						while ((c = pf->getc()) != EOF) {
-							if ('#' == c || ';' == c || '\n' == c)
+							if ('#' == c || ';' == c || '\n' == c || '\r' == c)
 								break;
 						}
 					}
@@ -242,7 +242,7 @@ namespace ec
 						so.pop_back();
 					while (EOF != c) {
 						so += c;
-						if ('\n' == c)
+						if ('\n' == c || '\r' == c)
 							break;
 						c = pf->getc();
 					}
@@ -294,7 +294,7 @@ namespace ec
 				case '#':
 				case ';':
 					while ((c = pf->getc()) != EOF) {
-						if ('\n' == c)
+						if ('\n' == c || '\r' == c)
 							break;
 					}
 					key.clear();
@@ -302,7 +302,7 @@ namespace ec
 				case  '[':
 					blk.clear();
 					while ((c = pf->getc()) != EOF) {
-						if (']' == c || '\n' == c) {
+						if (']' == c || '\n' == c || '\r' == c) {
 							key.clear();
 							val.clear();
 							if (fun(blk, key, val))
@@ -315,9 +315,8 @@ namespace ec
 				case '=':
 					val.clear();
 					while ((c = pf->getc()) != EOF) {
-						if ('#' == c || ';' == c || '\n' == c) {
+						if ('#' == c || ';' == c || '\n' == c || '\r' == c)
 							break;
-						}
 						if (!val.empty() || ('\x20' != c && '\t' != c))
 							val += c;
 					}
