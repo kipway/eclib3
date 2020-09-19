@@ -2,7 +2,7 @@
 \file ec_diskio.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.10
+\update 2020.9.15
 
 io
 	tools for disk IO，use utf-8 parameters
@@ -489,11 +489,13 @@ namespace ec
 		{
 #ifdef _WIN32
 			char szFilter[512];
-			snprintf(szFilter, sizeof(szFilter), "%s*.*", utf8path);
+			hFind = INVALID_HANDLE_VALUE;
+			memset(&FindFileData, 0, sizeof(FindFileData));
+			if (snprintf(szFilter, sizeof(szFilter), "%s*.*", utf8path) < 0)
+				return;
 			wchar_t sfile[512];
-			int n = MultiByteToWideChar(CP_UTF8, 0, szFilter, -1, sfile, sizeof(sfile) / sizeof(wchar_t));
-			sfile[n] = 0;
-			hFind = FindFirstFileW(sfile, &FindFileData);
+			if (MultiByteToWideChar(CP_UTF8, 0, szFilter, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
+				hFind = FindFirstFileW(sfile, &FindFileData);
 #else
 			dir = opendir(utf8path);
 #endif
@@ -516,7 +518,6 @@ namespace ec
 #ifdef _WIN32
 		WIN32_FIND_DATAW FindFileData;
 		HANDLE hFind;// = INVALID_HANDLE_VALUE;
-		bool bfind;
 		char _utf8tmp[512];
 #else
 		DIR * dir;

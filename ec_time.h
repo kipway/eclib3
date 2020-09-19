@@ -2,12 +2,12 @@
 \file ec_time.h
 \author	jiangyong
 \email	kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.15
 
 cTime
 	wrapper class for time
 cDateTime
-	date time 
+	date time
 cJobTime
 	job timer class
 cBps
@@ -138,22 +138,23 @@ namespace ec
 	class cTime
 	{
 	public:
-		cTime()
+		cTime() : _gmt(0)
+			, _year(1970), _mon(1), _day(1)
+			, _hour(0), _min(0), _sec(0)
 		{
-			SetTime(::time(0));
-		};
-		cTime(time_t gmt)
+		}
+		cTime(time_t gmt) :cTime()
 		{
 			SetTime(gmt);
-		};
-		cTime(int nyear, int nmon, int nday)
+		}
+		cTime(int nyear, int nmon, int nday) :cTime()
 		{
 			SetTime(nyear, nmon, nday);
-		};
-		cTime(int nyear, int nmon, int nday, int nhour, int nmin, int nsec)
+		}
+		cTime(int nyear, int nmon, int nday, int nhour, int nmin, int nsec) :cTime()
 		{
 			SetTime(nyear, nmon, nday, nhour, nmin, nsec);
-		};
+		}
 		~cTime() {};
 		void SetTime(int nyear, int nmon, int nday)
 		{
@@ -198,7 +199,7 @@ namespace ec
 		inline time_t GetTime() const
 		{
 			return _gmt;
-		};
+		}
 		void SetTime(time_t gmt)
 		{
 			_gmt = gmt;
@@ -226,19 +227,19 @@ namespace ec
 			SetTime(gmt);
 			return *this;
 		}
-		void tostring(char* sout, size_t sizeout, bool hastime = true)
+		int tostring(char* sout, size_t sizeout, bool hastime = true)
 		{
 			if (hastime)
-				snprintf(sout, sizeout, "%d/%d/%d %d:%d:%d", _year, _mon, _day, _hour, _min, _sec);
+				return snprintf(sout, sizeout, "%d/%d/%d %d:%d:%d", _year, _mon, _day, _hour, _min, _sec);
 			else
-				snprintf(sout, sizeout, "%d/%d/%d", _year, _mon, _day);
+				return snprintf(sout, sizeout, "%d/%d/%d", _year, _mon, _day);
 		}
-		void tostring_ag(char* sout, size_t sizeout, bool hastime = true)
+		int tostring_ag(char* sout, size_t sizeout, bool hastime = true)
 		{
 			if (hastime)
-				snprintf(sout, sizeout, "%d/%02d/%02d %02d:%02d:%02d", _year, _mon, _day, _hour, _min, _sec);
+				return snprintf(sout, sizeout, "%d/%02d/%02d %02d:%02d:%02d", _year, _mon, _day, _hour, _min, _sec);
 			else
-				snprintf(sout, sizeout, "%d/%02d/%02d", _year, _mon, _day);
+				return snprintf(sout, sizeout, "%d/%02d/%02d", _year, _mon, _day);
 		}
 
 		int weekday()   // 1=monday,..., 7=sunday, 0:error
@@ -263,7 +264,7 @@ namespace ec
 	{
 	public:
 		cDateTime() : _nyear(0), _nmon(0), _nday(0), _nhour(0), _nmin(0), _nsec(0), _nmsec(0), _gmt(-1) { };
-		cDateTime(const char *s) : _nyear(0), _nmon(0), _nday(0), _nhour(0), _nmin(0), _nsec(0), _gmt(-1)
+		cDateTime(const char *s) : cDateTime()
 		{
 			parse(s);
 		}
@@ -397,15 +398,14 @@ namespace ec
 	class cJobTime
 	{
 	public:
-		cJobTime()
+		cJobTime() :_utimeinit(0), _ti_o(0), _ti_add(86400)
 		{
-			SetTime(0, 0, 0);
 		}
-		cJobTime(int nsec)
+		cJobTime(int nsec) :cJobTime()
 		{
 			SetTime(nsec);
 		}
-		cJobTime(int hour, int min, int sec)//hour,min,sec is local time zone
+		cJobTime(int hour, int min, int sec) :cJobTime()//hour,min,sec is local time zone
 		{
 			SetTime(hour, min, sec);
 		}

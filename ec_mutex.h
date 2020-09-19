@@ -2,7 +2,7 @@
 \file ec_mutex.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.15
 
 class unique_lock;
 class spinlock;
@@ -51,7 +51,8 @@ namespace ec {
 
 		spinlock()
 		{
-			InitializeCriticalSectionAndSpinCount(&_v, UINT16_MAX);
+			if (!InitializeCriticalSectionAndSpinCount(&_v, UINT16_MAX))
+				memset(&_v, 0, sizeof(_v));
 		}
 		~spinlock()
 		{

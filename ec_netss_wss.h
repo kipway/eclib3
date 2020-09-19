@@ -2,7 +2,7 @@
 \file ec_netsrv_wss.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.19
 
 net::session_wss
 	websocket over HTTPS(TLS1.2) session
@@ -50,7 +50,7 @@ namespace ec
 		public:
 			virtual int onrecvbytes(const void* pdata, size_t size, bytes* pmsgout)
 			{
-				_timelastio = ::time(0);
+				_timelastio = ::time(nullptr);
 				bytes data(_pssmem);
 				data.reserve(1024 * 20);
 				int nr = session_tls::onrecvbytes(pdata, size, &data);

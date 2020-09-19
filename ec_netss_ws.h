@@ -2,7 +2,7 @@
 \file ec_netsrv_ws.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.15
 
 net server http/ws session class
 
@@ -104,332 +104,94 @@ namespace ec
 					_pwslog->add(CLOG_DEFAULT_ERR, "ws send failed _protocol = %d", _nws);
 				return -1;
 			}
-		public:
-			bool httprequest(ec::mimecfg* pmine, const char* sroot, ec::http::package* pPkg) //default httprequest
-			{
-				if (pPkg->ismethod("GET")) {
-					char skey[128];
-					if (pPkg->GetWebSocketKey(skey, sizeof(skey))) //websocket Upgrade
-						return DoUpgradeWebSocket(skey, pPkg);
-					return  DoGetAndHead(pmine, sroot, pPkg);
-				}
-				else if (pPkg->ismethod("HEAD"))
-					return  DoGetAndHead(pmine, sroot, pPkg, false);
-				httpreterr(http_sret400, 400);
-				return pPkg->HasKeepAlive();
-			}
-
-			bool parserange(const char* stxt, size_t txtlen, int64_t &lpos, int64_t &lsize)
-			{
-				char suints[8] = { 0 }, spos[16] = { 0 }, ssize[8] = { 0 };
-				size_t pos = 0;
-				if (!strnext('=', stxt, txtlen, pos, suints, sizeof(suints)) || !strieq("bytes", suints))
-					return false;
-				if (!strnext('-', stxt, txtlen, pos, spos, sizeof(spos)))
-					return false;
-				lpos = atoll(spos);
-				if (!strnext(',', stxt, txtlen, pos, ssize, sizeof(ssize)))
-					lsize = 0;
-				else
-					lsize = atoll(ssize);
-				return true;
-			}
-
-			bool DoGetAndHead(ec::mimecfg* pmine, const char* sroot, ec::http::package* pPkg, bool bGet = true)
-			{
-				char sfile[1024], tmp[1024];
-
-				sfile[0] = '\0';
-				tmp[0] = '\0';
-
-				if (!pPkg->GetUrl(sfile, sizeof(sfile)))
-					return false;
-				ec::url2utf8(sfile, tmp, (int)sizeof(tmp));
-				const char *su = tmp;
-				if (tmp[0] == '/') {
-					su++;
-					if (!*su)
-						snprintf(sfile, sizeof(sfile), "%sindex.html", sroot);
-					else
-						snprintf(sfile, sizeof(sfile), "%s%s", sroot, su);
-				}
-				else
-					snprintf(sfile, sizeof(sfile), "%s%s", sroot, su);
-
-				if (http::isdir(sfile)) {
-					httpreterr(http_sret404, 404);
-					return pPkg->HasKeepAlive();
-				}
-				long long flen = ec::io::filesize(sfile);
-				if (flen < 0) {
-					httpreterr(http_sret404, 404);
-					return pPkg->HasKeepAlive();
-				}
-				if (!bGet) // head
-					return DoHead(sfile, pPkg);
-
-				int64_t rangpos = 0, rangsize = 0;
-				if (pPkg->GetHeadFiled("Range", tmp, sizeof(tmp))) { // "Range: bytes=0-1023"
-					if (!parserange(tmp, strlen(tmp), rangpos, rangsize)) {
-						httpreterr(http_sret413, 413);
-						return pPkg->HasKeepAlive();
-					}
-				}
-				if (rangsize > HTTP_MAX_RANG_SIZE)
-					rangsize = HTTP_MAX_RANG_SIZE;
-				if (!rangpos && !rangsize) { // get all
-					if (flen > HTTP_MAX_RANG_SIZE) {
-						httpreterr(http_sret413, 413);
-						return pPkg->HasKeepAlive();
-					}
-					else
-						return DoGet(pmine, sfile, pPkg);
-				}
-				return DoGetRang(pmine, sfile, pPkg, rangpos, rangsize, flen);
-			}
-
-			void httpreterr(const char* sret, int errcode)
-			{
-				int nret = ws_iosend(sret, strlen(sret));
-				if (_pwslog) {
-					if (nret >= 0)
-						_pwslog->add(CLOG_DEFAULT_DBG, "http write ucid(%u): error %d", _ucid, errcode);
-					else
-						_pwslog->add(CLOG_DEFAULT_DBG, "http write ucid(%u) failed.", _ucid);
-				}
-			}
-
-			static bool iszipfile(const char *sext)
-			{
-				const char* s[] = { ".zip", ".rar", ".tar", ".7z", ".gz", ".jpg", ".jpeg", ".gif", ".arj", ".jar" };
-				size_t i = 0;
-				for (i = 0; i < sizeof(s) / sizeof(const char*); i++) {
-					if (ec::strieq(sext, s[i]))
-						return true;
-				}
-				return false;
-			}
 		private:
-			bool DoHead(const char* sfile, ec::http::package* pPkg)
-			{
-				char tmp[4096];
-				tmp[0] = '\0';
-
-				long long flen = ec::io::filesize(sfile);
-				if (flen < 0) {
-					httpreterr(http_sret404, 404);
-					return pPkg->HasKeepAlive();
-				}
-				string answer(_pwsmem);
-				answer.reserve(1024 * 32);
-
-				answer.append("HTTP/1.1 200 ok\r\n");
-				answer.append("Server: eclib websocket server\r\n");
-
-				if (pPkg->HasKeepAlive())
-					answer.append("Connection: keep-alive\r\n");
-
-				answer.append("Accept-Ranges: bytes\r\n");
-
-				sprintf(tmp, "Content-Length: %lld\r\n\r\n", flen);
-				answer.append(tmp);
-				if (_pwslog)
-					_pwslog->add(CLOG_DEFAULT_DBG, "http head write ucid(%u) size %zu\n%s", _ucid, answer.size(), answer.c_str());
-				return ws_send(answer.data(), answer.size()) > 0;
-			}
-
-			bool DoGet(ec::mimecfg* pmine, const char* sfile, ec::http::package* pPkg)
-			{
-				char tmp[4096];
-				tmp[0] = '\0';
-
-				string answer(_pwsmem);
-				answer.reserve(1024 * 32);
-				answer.append("HTTP/1.1 200 ok\r\n").append("Server: eclib websocket server\r\n");
-
-				if (pPkg->HasKeepAlive())
-					answer.append("Connection: keep-alive\r\n");
-
-				char sminetype[32] = { 0 };
-				const char* sext = http::file_extname(sfile);
-				if (sext && *sext && pmine->getmime(sext, tmp, sizeof(tmp))) {
-					answer.append("Content-type: ").append(tmp).append("\r\n");
-					size_t ipos = 0;
-					ec::strnext('/', tmp, strlen(tmp), ipos, sminetype, sizeof(sminetype));
-				}
-				else
-					answer.append("Content-type: application/octet-stream\r\n");
-
-				string filetmp(_pwsmem);
-				filetmp.reserve(1024 * 16);
-				if (!io::lckread(sfile, &filetmp)) {
-					httpreterr(http_sret404, 404);
-					return pPkg->HasKeepAlive();
-				}
-				int necnode = 0;
-				if (filetmp.size() > 1024 && (ec::strieq(sminetype, "text") || (strieq(sminetype, "application") && !iszipfile(sext)))
-					&& pPkg->GetHeadFiled("Accept-Encoding", tmp, sizeof(tmp))) {
-					char sencode[16] = { 0 };
-					size_t pos = 0;
-					while (ec::strnext(";,", tmp, strlen(tmp), pos, sencode, sizeof(sencode))) {
-						if (!ec::stricmp("gzip", sencode)) {
-							answer.append("Content-Encoding: gzip\r\n");
-							necnode = 2;
-							break;
-						}
-						if (!ec::stricmp("deflate", sencode)) {
-							answer.append("Content-Encoding: deflate\r\n");
-							necnode = 1;
-						}
-					}
-				}
-				if (necnode) {
-					size_t poslen = answer.size(), sizecl;
-					sprintf(tmp, "Content-Length: %9zu\r\n\r\n", filetmp.size());
-					sizecl = strlen(tmp);
-					answer.append(tmp, sizecl);
-					if (Z_OK != http::package::encode_body(filetmp.data(), filetmp.size(), &answer, necnode == 2)) {
-						if (_pwslog)
-							_pwslog->add(CLOG_DEFAULT_ERR, "ucid(%u) ws_encode_zlib failed", _ucid);
-						return false;
-					}
-					filetmp.clear();
-					filetmp.shrink_to_fit();
-					sprintf(tmp, "Content-Length: %9zu\r\n\r\n", (answer.size() - poslen - sizecl));
-					size_t z1 = strlen(tmp);
-					while (z1 < sizecl) {
-						tmp[z1] = '\x20';
-						z1++;
-						tmp[z1] = '\0';
-					}
-					memcpy(answer.data() + poslen, tmp, sizecl);	// reset Content-Length
-				}
-				else {
-					sprintf(tmp, "Content-Length: %zu\r\n\r\n", filetmp.size());
-					answer.append(tmp, strlen(tmp));
-					answer.append(filetmp.data(), filetmp.size());
-				}
-				if (_pwslog)
-					_pwslog->add(CLOG_DEFAULT_DBG, "http write ucid(%u) size %zu", _ucid, answer.size());
-				return ws_send(answer.data(), answer.size()) > 0;
-			}
-
-			bool DoGetRang(ec::mimecfg* pmine, const char* sfile, ec::http::package* pPkg, int64_t lpos, int64_t lsize, int64_t lfilesize)
-			{
-				char tmp[4096];
-				tmp[0] = '\0';
-
-				string answer(_pwsmem);
-				answer.reserve(1024 * 32);
-				answer.append("HTTP/1.1 206 Partial Content\r\n").append("Server: eclib websocket server\r\n");
-
-				if (pPkg->HasKeepAlive())
-					answer.append("Connection: keep-alive\r\n");
-
-				answer.append("Accept-Ranges: bytes\r\n");
-
-				const char* sext = http::file_extname(sfile);
-				if (sext && *sext && pmine->getmime(sext, tmp, sizeof(tmp))) {
-					answer.append("Content-type: ").append(tmp).append("\r\n");
-				}
-				else
-					answer.append("Content-type: application/octet-stream\r\n");
-
-				string filetmp(_pwsmem);
-				filetmp.reserve(1024 * 32);
-				if (!io::lckread(sfile, &filetmp, lpos, lsize)) {
-					httpreterr(http_sret404, 404);
-					return pPkg->HasKeepAlive();
-				}
-
-				snprintf(tmp, sizeof(tmp), "Content-Range: bytes %lld-%lld/%lld\r\n", (long long)lpos, (long long)(lpos + filetmp.size() - 1), (long long)lfilesize);
-				answer.append(tmp);
-				snprintf(tmp, sizeof(tmp), "Content-Length: %zu\r\n\r\n", filetmp.size());
-				answer.append(tmp);
-
-				answer.append(filetmp.data(), filetmp.size());
-				if (_pwslog)
-					_pwslog->add(CLOG_DEFAULT_DBG, "http write rang rang %lld-%lld/%lld", (long long)lpos, (long long)(lpos + filetmp.size() - 1), (long long)lfilesize);
-				return ws_send(answer.data(), answer.size()) > 0;
-			}
 			bool DoUpgradeWebSocket(const char *skey, ec::http::package* pPkg)
 			{
-				if (_pwslog) {
-					char stmp[128] = { 0 };
-					array<char, 1024> sa;
-					if (pPkg->GetHeadFiled("Origin", stmp, sizeof(stmp))) {
-						sa.append("\n\tOrigin: ").append(stmp);
-					}
-					if (pPkg->GetHeadFiled("Sec-WebSocket-Extensions", stmp, sizeof(stmp))) {
-						sa.append("\n\tSec-WebSocket-Extensions: ").append(stmp);
-					}
-					_pwslog->add(CLOG_DEFAULT_MOR, "ucid(%u) upgrade websocket%s", _ucid, sa.c_str());
-				}
-				char sProtocol[128] = { 0 }, sVersion[128] = { 0 }, tmp[256] = { 0 }, sha1out[20] = { 0 }, base64out[32] = { 0 };
-				pPkg->GetHeadFiled("Sec-WebSocket-Protocol", sProtocol, sizeof(sProtocol));
-				pPkg->GetHeadFiled("Sec-WebSocket-Version", sVersion, sizeof(sVersion));
-				if (atoi(sVersion) != 13) {
-					if (_pwslog)
-						_pwslog->add(CLOG_DEFAULT_MOR, "ws sVersion(%s) error :ucid=%d, ", sVersion, _ucid);
-					ws_send(http_sret400, strlen(http_sret400));
-					return pPkg->HasKeepAlive();
-				}
-				string vret(_pwsmem);
-				vret.reserve(1024 * 4);
-				const char*sc = "HTTP/1.1 101 Switching Protocols\x0d\x0a"\
-					"Upgrade: websocket\x0d\x0a"\
-					"Connection: Upgrade\x0d\x0a";
-				vret.append(sc);
-
-				strcpy(tmp, skey);
-				strcat(tmp, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-				encode_sha1(tmp, (unsigned int)strlen(tmp), sha1out); //SHA1
-				encode_base64(base64out, sha1out, 20);    //BASE64
-
-				vret.append("Sec-WebSocket-Accept: ").append(base64out).append("\x0d\x0a");
-				if (sProtocol[0]) {
-					vret.append("Sec-WebSocket-Protocol: ").append(sProtocol).append("\x0d\x0a");
-				}
-				if (pPkg->GetHeadFiled("Host", tmp, sizeof(tmp))) {
-					vret.append("Host: ").append(tmp, strlen(tmp)).append("\x0d\x0a");
-				}
-				_wscompress = 0;
-				if (pPkg->GetHeadFiled("Sec-WebSocket-Extensions", tmp, sizeof(tmp))) {
-					char st[64] = { 0 };
-					size_t pos = 0, len = strlen(tmp);
-					while (ec::strnext(";,", tmp, len, pos, st, sizeof(st))) {
-						if (!ec::stricmp("permessage-deflate", st)) {
-							vret.append("Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover; client_no_context_takeover\x0d\x0a");
-							_wscompress = ws_permessage_deflate;
-							break;
+				try {
+					if (_pwslog) {
+						char stmp[128] = { 0 };
+						str1k sa;
+						if (pPkg->GetHeadFiled("Origin", stmp, sizeof(stmp))) {
+							sa.append("\n\tOrigin: ").append(stmp);
 						}
-						else if (!ec::stricmp("x-webkit-deflate-frame", st)) {
-							vret.append("Sec-WebSocket-Extensions: x-webkit-deflate-frame; no_context_takeover\x0d\x0a", 2);
-							_wscompress = ws_x_webkit_deflate_frame;
-							break;
+						if (pPkg->GetHeadFiled("Sec-WebSocket-Extensions", stmp, sizeof(stmp))) {
+							sa.append("\n\tSec-WebSocket-Extensions: ").append(stmp);
+						}
+						_pwslog->add(CLOG_DEFAULT_MOR, "ucid(%u) upgrade websocket%s", _ucid, sa.c_str());
+					}
+					char sProtocol[128] = { 0 }, sVersion[128] = { 0 }, tmp[256] = { 0 }, sha1out[20] = { 0 }, base64out[32] = { 0 };
+					pPkg->GetHeadFiled("Sec-WebSocket-Protocol", sProtocol, sizeof(sProtocol));
+					pPkg->GetHeadFiled("Sec-WebSocket-Version", sVersion, sizeof(sVersion));
+					if (atoi(sVersion) != 13) {
+						if (_pwslog)
+							_pwslog->add(CLOG_DEFAULT_MOR, "ws sVersion(%s) error :ucid=%d, ", sVersion, _ucid);
+						ws_send(http_sret400, strlen(http_sret400));
+						return pPkg->HasKeepAlive();
+					}
+					string vret(_pwsmem);
+
+					vret.reserve(1024 * 4);
+					const char*sc = "HTTP/1.1 101 Switching Protocols\x0d\x0a"\
+						"Upgrade: websocket\x0d\x0a"\
+						"Connection: Upgrade\x0d\x0a";
+					vret.append(sc);
+
+					strcpy(tmp, skey);
+					strcat(tmp, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+					encode_sha1(tmp, (unsigned int)strlen(tmp), sha1out); //SHA1
+					encode_base64(base64out, sha1out, 20);    //BASE64
+
+					vret.append("Sec-WebSocket-Accept: ").append(base64out).append("\x0d\x0a");
+					if (sProtocol[0]) {
+						vret.append("Sec-WebSocket-Protocol: ").append(sProtocol).append("\x0d\x0a");
+					}
+					if (pPkg->GetHeadFiled("Host", tmp, sizeof(tmp))) {
+						vret.append("Host: ").append(tmp, strlen(tmp)).append("\x0d\x0a");
+					}
+					_wscompress = 0;
+					if (pPkg->GetHeadFiled("Sec-WebSocket-Extensions", tmp, sizeof(tmp))) {
+						char st[64] = { 0 };
+						size_t pos = 0, len = strlen(tmp);
+						while (ec::strnext(";,", tmp, len, pos, st, sizeof(st))) {
+							if (!ec::stricmp("permessage-deflate", st)) {
+								vret.append("Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover; client_no_context_takeover\x0d\x0a");
+								_wscompress = ws_permessage_deflate;
+								break;
+							}
+							else if (!ec::stricmp("x-webkit-deflate-frame", st)) {
+								vret.append("Sec-WebSocket-Extensions: x-webkit-deflate-frame; no_context_takeover\x0d\x0a", 2);
+								_wscompress = ws_x_webkit_deflate_frame;
+								break;
+							}
 						}
 					}
-				}
-				vret.append("\x0d\x0a");
-				_txt.clear();
-				_txt.shrink_to_fit();
-				int ns = ws_send(vret.data(), vret.size());
-				if (_pwslog) {
-					for (auto &v : vret) {
-						if ('\r' == v)
-							v = '\x20';
+					vret.append("\x0d\x0a");
+
+					_txt.clear();
+					_txt.shrink_to_fit();
+					int ns = ws_send(vret.data(), vret.size());
+					if (_pwslog) {
+						for (auto &v : vret) {
+							if ('\r' == v)
+								v = '\x20';
+						}
 					}
-				}
-				if (ns < 0) {
+					if (ns < 0) {
+						if (_pwslog)
+							_pwslog->add(CLOG_DEFAULT_MOR, "ucid(%d) upggrade WS failed\n%s", _ucid, vret.c_str());
+						return false;
+					}
 					if (_pwslog)
-						_pwslog->add(CLOG_DEFAULT_MOR, "ucid(%d) upggrade WS failed\n%s", _ucid, vret.c_str());
+						_pwslog->add(CLOG_DEFAULT_MOR, "ucid(%d) upggrade WS success\n%s", _ucid, vret.c_str());
+					_nws = 1; //update websocket
+					onupdatews();
+					return ns > 0;
+				}
+				catch (...) {
+					if (_pwslog)
+						_pwslog->add(CLOG_DEFAULT_ERR, "DoUpgradeWebSocket exception");
 					return false;
 				}
-				if (_pwslog)
-					_pwslog->add(CLOG_DEFAULT_MOR, "ucid(%d) upggrade WS success\n%s", _ucid, vret.c_str());
-				_nws = 1; //update websocket
-				onupdatews();
-				return ns > 0;
 			}
 
 			void reset_msg()

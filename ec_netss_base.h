@@ -2,7 +2,7 @@
 \file ec_netsrv_base.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.15
 
 session class for net::server.
 
@@ -97,6 +97,7 @@ namespace ec
 			evtfd()
 			{
 				_fd = INVALID_SOCKET;
+				memset(&_sinaddr, 0, sizeof(_sinaddr));
 			}
 			~evtfd()
 			{

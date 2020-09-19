@@ -2,7 +2,7 @@
 \file ec_netsrv.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.15
 
 net::server
 	a class for TCP/UDP, HTTP/HTTPS, WS/WSS
@@ -138,8 +138,8 @@ namespace ec
 							if (_plog)
 								_plog->add(CLOG_DEFAULT_MSG, "%s create success, ucid start %u", _sucidfile, _unextid);
 							char sid[40] = { 0 };
-							snprintf(sid, sizeof(sid), "%u", _unextid);
-							fwrite(sid, 1, strlen(sid), pf);
+							if(snprintf(sid, sizeof(sid), "%u", _unextid) > 0)
+								fwrite(sid, 1, strlen(sid), pf);
 							fclose(pf);
 						}
 						else {
@@ -538,8 +538,8 @@ namespace ec
 					FILE *pf = fopen(_sucidfile, "wt");
 					if (pf) {
 						char sid[40] = { 0 };
-						snprintf(sid, sizeof(sid), "%u", _unextid);
-						fwrite(sid, 1, strlen(sid), pf);
+						if(snprintf(sid, sizeof(sid), "%u", _unextid) > 0)
+							fwrite(sid, 1, strlen(sid), pf);
 						fclose(pf);
 						if (_plog)
 							_plog->add(CLOG_DEFAULT_DBG, "write ucid %u to %s success", _unextid, _sucidfile);

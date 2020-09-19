@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.15
 
 array
 	a extended array class for trivially copyable type
@@ -41,6 +41,7 @@ using str256 = ec::array<char,256>;
 #include <memory.h>
 #include <type_traits>
 #include <stdexcept>
+#include <stdarg.h>
 namespace ec {
 	template<typename _Tp, size_t _Num>
 	class array {
@@ -140,47 +141,59 @@ namespace ec {
 		}
 	public: // Element access
 
-		reference operator [](size_type pos)
+		reference operator [](size_type pos) noexcept
 		{
+			if (pos >= _size)
+				return _data[0];
 			return _data[pos];
 		}
 
-		const_reference operator [](size_type pos) const
+		const_reference operator [](size_type pos) const noexcept
 		{
+			if (pos >= _size)
+				return _data[0];
 			return _data[pos];
 		}
 
 		reference at(size_type pos)
 		{
 			if (pos >= _Num)
-				throw std::range_error("range error");
+				throw std::out_of_range("out of range");
 			return _data[pos];
 		}
 
 		const_reference at(size_type pos) const noexcept
 		{
 			if (pos >= _Num)
-				throw std::range_error("range error");
+				throw std::out_of_range("out of range");
 			return _data[pos];
 		}
 
-		inline reference front() noexcept
+		inline reference front()
 		{
+			if (!_size)
+				throw std::out_of_range("out of range");
 			return _data[0];
 		}
 
-		inline const_reference front() const noexcept
+		inline const_reference front() const
 		{
+			if (!_size)
+				throw std::out_of_range("out of range");
 			return _data[0];
 		}
 
-		inline reference back() noexcept
+		inline reference back()
 		{
+			if (!_size)
+				throw std::out_of_range("out of range");
 			return _data[_size - 1];
 		}
 
-		const_reference back() const noexcept
+		const_reference back() const
 		{
+			if (!_size)
+				throw std::out_of_range("out of range");
 			return _data[_size - 1];
 		}
 
@@ -208,7 +221,7 @@ namespace ec {
 		}
 
 	public: // extend
-		bool _append(const value_type *pbuf, size_type usize)
+		bool _append(const value_type *pbuf, size_type usize) noexcept
 		{
 			if (!usize || !pbuf)
 				return true;
@@ -221,15 +234,20 @@ namespace ec {
 
 		array& append(const value_type *pbuf, size_type usize)
 		{ //like std::string::append
-			if (_append(pbuf, usize))
-				return *this;
-			throw std::range_error("range error");
+			if (_size + usize > _Num)
+				throw std::out_of_range("out of range");
+			if (usize && pbuf) {
+				memcpy(&_data[_size], pbuf, usize * sizeof(value_type));
+				_size += usize;
+			}
+			return *this;
 		};
 
-		void push_back(const value_type& val) noexcept
+		void push_back(const value_type& val)
 		{ //like std::vector::push_back
-			if (_size < _Num)
-				_data[_size++] = val;
+			if (_size >= _Num)
+				throw std::out_of_range("out of range");
+			_data[_size++] = val;
 		}
 
 		void pop_back() noexcept
@@ -238,7 +256,7 @@ namespace ec {
 				_size--;
 		}
 
-		inline void push(const value_type& val) noexcept
+		inline void push(const value_type& val)
 		{ // like std::stack::push
 			push_back(val);
 		}
@@ -352,7 +370,28 @@ namespace ec {
 			push_back(c);
 			return *this;
 		}
-
+		inline array& operator+= (const array& v)
+		{
+			return append(v.data(), v.size());
+		}
+		
+#ifdef _WIN32
+		bool printf(const char * format, ...)
+#else
+		bool printf(const char * format, ...) __attribute__((format(printf, 2, 3)))
+#endif
+		{
+			va_list arg_ptr;
+			va_start(arg_ptr, format);
+			int n = vsnprintf(_data, _Num, format, arg_ptr);
+			va_end(arg_ptr);
+			_pos = 0;
+			_size = 0;
+			if (n < 0 || n >= (int)_Num)
+				return false;
+			_size = n;
+			return true;
+		}
 	public: // use as stream for sizeof(value_type) == 1
 
 		static bool is_be() // is big endian
@@ -387,7 +426,7 @@ namespace ec {
 			array & read(T* pbuf, size_type size)
 		{
 			if (_pos + size > _size)
-				throw std::range_error("oversize");
+				throw std::out_of_range("out of range");
 			memcpy(pbuf, (const uint8_t*)_data + _pos, size);
 			_pos += size;
 			return *this;
@@ -398,7 +437,7 @@ namespace ec {
 			array & write(const T* pbuf, size_type size)
 		{
 			if (_pos + size > _Num)
-				throw std::range_error("oversize");
+				throw std::out_of_range("out of range");
 			memcpy((uint8_t*)_data + _pos, pbuf, size);
 			_pos += size;
 			if (_size < _pos)
@@ -411,7 +450,7 @@ namespace ec {
 			array & operator >> (T& v)
 		{ // read as little_endian
 			if (_pos + sizeof(T) > _size)
-				throw std::range_error("oversize");
+				throw std::out_of_range("out of range");
 			if (!is_be())
 				memcpy(&v, (const uint8_t*)_data + _pos, sizeof(T));
 			else {
@@ -431,7 +470,7 @@ namespace ec {
 			array & operator > (T & v)
 		{  // read as big_endian
 			if (_pos + sizeof(T) > _size)
-				throw std::range_error("oversize");
+				throw std::out_of_range("out of range");
 			if (is_be())
 				memcpy(&v, (const uint8_t*)_data + _pos, sizeof(T));
 			else {
@@ -451,7 +490,7 @@ namespace ec {
 			array & operator << (T v)
 		{  // write as little_endian
 			if (_pos + sizeof(T) > _Num)
-				throw std::range_error("oversize");
+				throw std::out_of_range("out of range");
 
 			if (!is_be())
 				memcpy((uint8_t*)_data + _pos, &v, sizeof(T));
@@ -474,7 +513,7 @@ namespace ec {
 			array & operator < (T v)
 		{   // write as big_endian
 			if (_pos + sizeof(T) > _Num)
-				throw std::range_error("oversize");
+				throw std::out_of_range("out of range");
 			if (is_be())
 				memcpy((uint8_t*)_data + _pos, &v, sizeof(T));
 			else {

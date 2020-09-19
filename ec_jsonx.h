@@ -2,7 +2,7 @@
 \file ec_jsonx.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.19
 
 json
 	a fast json parse class
@@ -34,6 +34,8 @@ namespace ec
 		};
 
 		struct t_kv {
+			t_kv() :_type(jstring) {
+			}
 			txt _k, _v;
 			int _type;
 		};

@@ -2,7 +2,7 @@
 \file ec_stream.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.15
 
 stream
 	memery stream class
@@ -25,13 +25,10 @@ namespace ec
 	class stream
 	{
 	public:
-		stream()
+		stream() : _pos(0), _size(0), _ps(nullptr)
 		{
-			_ps = 0;
-			_size = 0;
-			_pos = 0;
 		};
-		stream(void* p, size_t size)
+		stream(void* p, size_t size) : stream()
 		{
 			attach(p, size);
 		};

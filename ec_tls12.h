@@ -2,7 +2,7 @@
 \file ec_tls12.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.19
 
 TLS1.2(rfc5246)  session class
 
@@ -196,6 +196,8 @@ namespace ec
 				_pkgtcp(pmem), _bhandshake_finished(false)
 			{
 				_pkgtcp.reserve(1024 * 20);
+				_key_swmac[0] = 0;
+				_keyblock[0] = 0;
 				resetblks();
 				_hmsg = handshake::new_cls(_pmem);
 			};
@@ -253,9 +255,11 @@ namespace ec
 			handshake *_hmsg;
 			uint8_t  _serverrand[32], _clientrand[32], _master_key[48], _key_block[256];
 			bool  _bhandshake_finished;
-			void resetblks()
+			inline void resetblks()
 			{
 				memset(_keyblock, 0, sizeof(_keyblock));
+				memset(_key_cwmac, 0, sizeof(_key_cwmac));
+				memset(_key_swmac, 0, sizeof(_key_swmac));
 				memset(_serverrand, 0, sizeof(_serverrand));
 				memset(_clientrand, 0, sizeof(_clientrand));
 				memset(_master_key, 0, sizeof(_master_key));
@@ -699,10 +703,11 @@ namespace ec
 		public:
 			sessionclient(uint32_t ucid, memory* pmem, ilog* plog) : session(false, ucid, pmem, plog), _pkgm(pmem)
 			{
-				_prsa = 0;
-				_pevppk = 0;
-				_px509 = 0;
+				_prsa = nullptr;
+				_pevppk = nullptr;
+				_px509 = nullptr;
 				_pubkeylen = 0;
+				_pubkey[0] = 0;
 				_pkgm.reserve(TLS_REC_BUF_SIZE);
 			}
 			virtual ~sessionclient()
@@ -713,9 +718,9 @@ namespace ec
 					EVP_PKEY_free(_pevppk);
 				if (_px509)
 					X509_free(_px509);
-				_prsa = 0;
-				_pevppk = 0;
-				_px509 = 0;
+				_prsa = nullptr;
+				_pevppk = nullptr;
+				_px509 = nullptr;
 			}
 		protected:
 			RSA *_prsa;
@@ -752,9 +757,9 @@ namespace ec
 					EVP_PKEY_free(_pevppk);
 				if (_px509)
 					X509_free(_px509);
-				_prsa = 0;
-				_pevppk = 0;
-				_px509 = 0;
+				_prsa = nullptr;
+				_pevppk = nullptr;
+				_px509 = nullptr;
 				_pkgm.clear();
 			}
 
@@ -856,22 +861,22 @@ namespace ec
 					}
 					if (!bok) {
 						X509_free(_px509);
-						_px509 = 0;
+						_px509 = nullptr;
 						return false;
 					}
 				}
 				_pevppk = X509_get_pubkey(_px509);
 				if (!_pevppk) {
 					X509_free(_px509);
-					_px509 = 0;
+					_px509 = nullptr;
 					return false;
 				}
 				_prsa = EVP_PKEY_get1_RSA(_pevppk);
 				if (!_prsa) {
 					EVP_PKEY_free(_pevppk);
 					X509_free(_px509);
-					_pevppk = 0;
-					_px509 = 0;
+					_pevppk = nullptr;
+					_px509 = nullptr;
 					return false;
 				}
 				return  true;
@@ -1231,10 +1236,10 @@ namespace ec
 				int nbytes = 0;
 				unsigned char premasterkey[48];
 				if (ulen % 16) {
-					uint32_t ulen = pmsg[4];//private key decode
-					ulen = (ulen << 8) | pmsg[5];
+					uint32_t ul = pmsg[4];//private key decode
+					ul = (ul << 8) | pmsg[5];
 					_pRsaLck->lock();
-					nbytes = RSA_private_decrypt((int)ulen, pmsg + 6, premasterkey, _pRsaPrivate, RSA_PKCS1_PADDING);
+					nbytes = RSA_private_decrypt((int)ul, pmsg + 6, premasterkey, _pRsaPrivate, RSA_PKCS1_PADDING);
 					_pRsaLck->unlock();
 				}
 				else {
@@ -1470,26 +1475,26 @@ namespace ec
 				if (!pf)
 					return false;
 
-				_pRsaPrivate = PEM_read_RSAPrivateKey(pf, 0, NULL, NULL);
+				_pRsaPrivate = PEM_read_RSAPrivateKey(pf, 0, nullptr, nullptr);
 				fclose(pf);
 
 				const unsigned char* p = _pcer.data();
-				_px509 = d2i_X509(NULL, &p, (long)_pcer.size());//only use first Certificate
+				_px509 = d2i_X509(nullptr, &p, (long)_pcer.size());//only use first Certificate
 				if (!_px509)
 					return false;
 
 				_pevppk = X509_get_pubkey(_px509);
 				if (!_pevppk) {
 					X509_free(_px509);
-					_px509 = 0;
+					_px509 = nullptr;
 					return false;
 				}
 				_pRsaPub = EVP_PKEY_get1_RSA(_pevppk);
 				if (!_pRsaPub) {
 					EVP_PKEY_free(_pevppk);
 					X509_free(_px509);
-					_pevppk = 0;
-					_px509 = 0;
+					_pevppk = nullptr;
+					_px509 = nullptr;
 					return false;
 				}
 				return true;

@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.15
 
 string , bytes and string functions
 
@@ -283,62 +283,58 @@ namespace ec
 		return true;
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		int url2utf8(const charT* url, char sout[], int noutsize)
-	{ //utf8 fomat url translate to utf8 string,add 0 at end
-		int n = 0;
+	template<class  _Str>
+	int url2utf8(const char* url, _Str &so)
+	{ //utf8 fomat url translate to utf8 string
 		unsigned char h, l;
-		while (*url && n < noutsize - 1) {
+		so.clear();
+		while (*url) {
 			if (*url == '%') {
 				url++;
 				if (!char2hex(*url++, &h))
 					break;
 				if (!char2hex(*url++, &l))
 					break;
-				sout[n++] = (char)((h << 4) | l);
+				so += (char)((h << 4) | l);
 			}
 			else if (*url == '+') {
-				sout[n++] = 32;
+				so += '\x20';
 				url++;
 			}
 			else
-				sout[n++] = *url++;
+				so += *url++;
 		}
-		sout[n] = 0;
-		return n;
+		return (int)so.size();
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		int utf82url(const charT* url, char sout[], int noutsize)
-	{ //utf8 string -> url,
-		int n = 0;
+	template<class _Str>
+	int utf82url(const char* url, _Str &so)
+	{ //utf8 string -> url
 		unsigned char h, l, *p = (unsigned char*)url;
-		while (*p && n < noutsize - 3) {
+		so.clear();
+		while (*p) {
 			if (*p == '\x20') {
-				sout[n++] = '+';
+				so += '+';
 				p++;
 			}
 			else if (*p & 0x80) {
-				sout[n++] = '%';
+				so += '%';
 				h = (*p & 0xF0) >> 4;
 				l = *p & 0x0F;
 				if (h >= 10)
-					sout[n++] = 'A' + h - 10;
+					so += ('A' + h - 10);
 				else
-					sout[n++] = '0' + h;
+					so += ('0' + h);
 				if (l >= 10)
-					sout[n++] = 'A' + l - 10;
+					so += ('A' + l - 10);
 				else
-					sout[n++] = '0' + l;
+					so += ('0' + l);
 				p++;
 			}
 			else
-				sout[n++] = (char)* p++;
+				so += (char)* p++;
 		}
-		sout[n] = 0;
-		return n;
+		return (int)so.size();
 	}
 
 	template<typename charT
@@ -473,7 +469,7 @@ namespace ec
 		*out = 0;
 		return (int)(sizeout - outlen - 1);
 #endif
-	}
+}
 
 	template<typename charT
 		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
@@ -724,4 +720,4 @@ namespace ec
 		}
 		return (int)out.size();
 	}
-}// namespace ec
+	}// namespace ec

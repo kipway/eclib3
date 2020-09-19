@@ -2,7 +2,7 @@
 \file ec_http.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.19
 
 classes for HTTP protocol parse
 
@@ -77,12 +77,18 @@ namespace ec
 	public:
 		hashmap<const char*, t_mime, t_keq_mine> _mime;
 	public:
-		bool getmime(const char* sext, char *sout, size_t outsize)
+		template<class _Str>
+		bool getmime(const char* sext, _Str& so) noexcept
 		{
 			t_mime t;
 			if (!_mime.get(sext, t))
 				return false;
-			strlcpy(sout, t.stype, outsize);
+			try {
+				so = t.stype;
+			}
+			catch (...) {
+				return false;
+			}
 			return true;
 		}
 		bool Load(const char* sfile)
@@ -136,6 +142,19 @@ namespace ec
 				return true;
 			return false;
 #endif
+		}
+
+		template<typename charT
+			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+			bool iszipfile(const charT *sext)
+		{
+			const char* s[] = { ".zip", ".rar", ".tar", ".7z", ".gz", ".jpg", ".jpeg", ".gif", ".arj", ".jar" };
+			size_t i = 0;
+			for (i = 0; i < sizeof(s) / sizeof(const char*); i++) {
+				if (ec::strieq(sext, s[i]))
+					return true;
+			}
+			return false;
 		}
 
 		template<typename charT
@@ -320,6 +339,22 @@ namespace ec
 				pout[_size] = 0;
 				return (int)_size;
 			}
+			template<class _Str>
+			int get(_Str &sout) const // return get chars
+			{
+				if (!_s || !_size) {
+					sout.clear();
+					return 0;
+				}
+				try {
+					sout.assign(_s, _size);
+				}
+				catch (...) {
+					return 0;
+				}
+				return (int)sout.size();
+			}
+
 			bool get2c(ctxt* pout, const char c) // get to c and skip c
 			{
 				pout->_s = _s;
@@ -553,6 +588,15 @@ namespace ec
 				sval[pt->_size] = 0;
 				return true;
 			}
+			template<class _Str>
+			bool GetHeadFiled(const ctxt &key, _Str &sval)
+			{
+				ctxt* pt = getattr(key);
+				if (!pt || !pt->_size)
+					return false;
+				sval.assign(pt->_s, pt->_size);
+				return true;
+			}
 			bool CheckHeadFiled(const ctxt &key, const char* sval)
 			{
 				char sv[80];
@@ -570,7 +614,7 @@ namespace ec
 			{
 				return CheckHeadFiled("Connection", "keep-alive");
 			}
-			inline bool GetWebSocketKey(char sout[], size_t size)
+			inline bool GetWebSocketKey(char *sout, size_t size)
 			{
 				return (CheckHeadFiled("Connection", "Upgrade") && CheckHeadFiled("Upgrade", "websocket")
 					&& GetHeadFiled("Sec-WebSocket-Key", sout, size));
@@ -584,7 +628,7 @@ namespace ec
 				*sout = 0;
 				return _req._method.get(sout, sizeout) > 0;
 			}
-			bool GetUrl(char sout[], size_t size)
+			bool GetUrl(char *sout, size_t size)
 			{
 				size_t i = 0u;
 				while (i + 1 < size && i < _req._url._size) {
@@ -597,8 +641,18 @@ namespace ec
 				return i > 0;
 			}
 
+			template<class _Str>
+			bool GetUrl(_Str& sout)
+			{
+				size_t i = 0u;
+				sout.clear();
+				while (i < _req._url._size && _req._url._s[i] != '?')
+					sout.push_back(_req._url._s[i++]);
+				return i > 0;
+			}
+
 			template<class _Out>
-			static int encode_body(const void *pSrc, size_t size_src, _Out* pout, bool gzip = false)
+			int encode_body(const void *pSrc, size_t size_src, _Out* pout, bool gzip = false)
 			{
 				z_stream stream;
 				int err;
@@ -636,7 +690,7 @@ namespace ec
 			}
 
 			template<class _Out>
-			static int decode_body(const void *pSrc, size_t size_src, _Out* pout, bool gzip = false)
+			int decode_body(const void *pSrc, size_t size_src, _Out* pout, bool gzip = false)
 			{
 				z_stream stream;
 				int err;
@@ -677,11 +731,10 @@ namespace ec
 				const char* Content_type, const char* headers, const char* pbody, size_t bodysize, bool bzip = true)
 			{
 				pout->clear();
-				char s[512];
-				int n = snprintf(s, sizeof(s), "HTTP/1.1 %d %s\r\n", statuscode, statusmsg);
-				if (n < 0)
+				str1k stmp;
+				if (!stmp.printf("HTTP/1.1 %d %s\r\n", statuscode, statusmsg))
 					return false;
-				pout->append(s, n);
+				pout->append(stmp.data(), stmp.size());
 				if (HasKeepAlive())
 					pout->append("Connection: keep-alive\r\n");
 
@@ -693,19 +746,18 @@ namespace ec
 					return true;
 				}
 				if (Content_type && *Content_type) {
-					n = snprintf(s, sizeof(s), "Content-type: %s\r\n", Content_type);
-					if (n < 0)
+					if (!stmp.printf("Content-type: %s\r\n", Content_type))
 						return false;
-					pout->append(s, n);
+					pout->append(stmp.data(), stmp.size());
 				}
 				else
 					pout->append("Content-type: application/octet-stream\r\n");
 
 				int bdeflate = 0;
-				if (bzip && GetHeadFiled("Accept-Encoding", s, sizeof(s))) {
+				if (bzip && bodysize > 512 && GetHeadFiled("Accept-Encoding", stmp)) {
 					char sencode[16] = { 0 };
 					size_t pos = 0;
-					while (strnext(";,", s, strlen(s), pos, sencode, sizeof(sencode))) {
+					while (strnext(";,", stmp.data(), stmp.size(), pos, sencode, sizeof(sencode))) {
 						if (!stricmp("gzip", sencode)) {
 							pout->append("Content-Encoding: gzip\r\n");
 							bdeflate = 2;
@@ -718,14 +770,16 @@ namespace ec
 					}
 				}
 				size_t poslen = pout->size(), sizehead;
-				snprintf(s, sizeof(s), "Content-Length: %9d\r\n\r\n", (int)bodysize);
-				pout->append(s);
+				if (!stmp.printf("Content-Length: %9d\r\n\r\n", (int)bodysize))
+					return false;
+				pout->append(stmp.data(), stmp.size());
 				sizehead = pout->size();
 				if (bdeflate) {
 					if (Z_OK != encode_body(pbody, bodysize, pout, bdeflate == 2))
 						return false;
-					snprintf(s, sizeof(s), "Content-Length: %9d\r\n\r\n", (int)(pout->size() - sizehead));
-					memcpy(pout->data() + poslen, s, strlen(s));
+					if (!stmp.printf("Content-Length: %9d\r\n\r\n", (int)(pout->size() - sizehead)))
+						return false;
+					memcpy((char*)pout->data() + poslen, stmp.data(), stmp.size());
 				}
 				else
 					pout->append(pbody, bodysize);
