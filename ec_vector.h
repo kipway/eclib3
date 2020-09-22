@@ -2,7 +2,7 @@
 \file ec_vector.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.20
 
 vector
 	a extend vector class for trivially copyable type, and expanded some functions, can be used as string, stack, stream
@@ -18,10 +18,18 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include <memory.h>
 #include <type_traits>
 #include <stdexcept>
+#include <stdarg.h>
 #include "ec_memory.h"
 namespace ec
 {
-	template<typename _Tp>
+	struct null_alloctor {
+		ec::memory* operator()()
+		{
+			return nullptr;
+		}
+	};
+
+	template<typename _Tp, class _Alloctor = null_alloctor>
 	class vector
 	{
 	public:
@@ -47,6 +55,8 @@ namespace ec
 			, _ubufsize(0)
 			, _pmem(pmem)
 		{
+			if (!pmem)
+				_pmem = _Alloctor()();
 		}
 
 		vector(const value_type* s, size_type size, ec::memory* pmem = nullptr) : vector(pmem)
@@ -62,7 +72,7 @@ namespace ec
 				append(s, strlen(s));
 		}
 
-		vector(const vector &v)
+		vector(const vector &v) : vector(v._pmem)
 		{
 			clear();
 			append(v.data(), v.size());
@@ -233,7 +243,19 @@ namespace ec
 			}
 			if (n <= _ubufsize)
 				return;
-			_grown(n - _usize);
+
+			value_type	*pt = nullptr;
+			size_t sizeout = 0;
+			pt = (value_type*)mem_malloc(n * sizeof(value_type), sizeout);
+			if (!pt)
+				throw std::bad_alloc();
+			if (_pbuf) {
+				if (_usize)
+					memcpy(pt, _pbuf, _usize * sizeof(value_type));
+				mem_free(_pbuf);
+			}
+			_pbuf = pt;
+			_ubufsize = sizeout / sizeof(value_type);
 		}
 
 		void shrink_to_fit()
@@ -526,12 +548,64 @@ namespace ec
 			return append((const value_type*)s, strlen(s));
 		}
 
-		vector& operator+= (value_type c)
+		inline vector& operator+= (value_type c)
 		{
 			push_back(c);
 			return *this;
 		}
 
+		inline vector& operator+= (const vector &v)
+		{
+			return append(v.data(), v.size());
+		}
+
+#ifdef _WIN32
+		bool printf(const char * format, ...)
+#else
+		bool printf(const char * format, ...) __attribute__((format(printf, 2, 3)))
+#endif
+		{
+			_pos = 0;
+			_usize = 0;
+			try {
+				if (!_ubufsize)
+					reserve(128);
+			}
+			catch (...) {
+				return false;
+			}
+			int n = 0;
+			{
+				va_list arg_ptr;
+				va_start(arg_ptr, format);
+				n = vsnprintf(_pbuf, _ubufsize, format, arg_ptr);
+				va_end(arg_ptr);
+			}
+			if (n < 0)
+				return false;
+			if (n < (int)_ubufsize) {
+				_usize = n;
+				return true;
+			}
+
+			try {
+				reserve(n + 1);
+			}
+			catch (...) {
+				return false;
+			}
+			{
+				va_list arg_ptr;
+				va_start(arg_ptr, format);
+				n = vsnprintf(_pbuf, _ubufsize, format, arg_ptr);
+				va_end(arg_ptr);
+			}
+			if (n > 0 && n < (int)_ubufsize) {
+				_usize = n;
+				return true;
+			}
+			return false;
+		}
 	public: //extend stream for sizeof(value_type) == 1
 		static bool is_be() // is big endian
 		{

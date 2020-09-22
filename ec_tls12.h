@@ -198,6 +198,7 @@ namespace ec
 				_pkgtcp.reserve(1024 * 20);
 				_key_swmac[0] = 0;
 				_keyblock[0] = 0;
+				_serverrand[0] = 0;
 				resetblks();
 				_hmsg = handshake::new_cls(_pmem);
 			};

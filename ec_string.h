@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.15
+\update 2020.9.20
 
 string , bytes and string functions
 
@@ -32,9 +32,31 @@ namespace std
 }
 
 #define WIN_CP_GBK  936
+
+#if (0 != USE_EC_STRING)
+#define DEFINE_EC_STRING_ALLOCTOR 	ec::spinlock ec_stringspinlock;\
+	ec::memory ec_stringallocator(48, 4096, 128, 2048, 512, 1024, &ec_stringspinlock);\
+	ec::memory* p_ec_string_allocator = &ec_stringallocator;
+
+#define DEFINE_EC_STRING_ALLOCTOR_ARM 	ec::spinlock ec_stringspinlock;\
+	ec::memory ec_stringallocator(48, 1024, 128, 512, 256, 128, &ec_stringspinlock);\
+	ec::memory* p_ec_string_allocator = &ec_stringallocator;\
+
+extern ec::memory* p_ec_string_allocator;
+struct ec_string_alloctor {
+	ec::memory* operator()()
+	{
+		return p_ec_string_allocator;
+	}
+};
+#endif
+
 namespace ec
 {
-	using string = vector<char>;
+#if (0 != USE_EC_STRING)
+	using string = vector<char, ec_string_alloctor>;
+#endif
+
 	using bytes = vector<unsigned char>;
 
 	using str32 = array<char, 32>;
@@ -469,7 +491,7 @@ namespace ec
 		*out = 0;
 		return (int)(sizeout - outlen - 1);
 #endif
-}
+	}
 
 	template<typename charT
 		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
@@ -720,4 +742,4 @@ namespace ec
 		}
 		return (int)out.size();
 	}
-	}// namespace ec
+}// namespace ec
