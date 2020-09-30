@@ -2,7 +2,7 @@
 \file ec_config.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.9.30
 
 namespace cfg 
 	tools for ini, config file.
@@ -133,7 +133,7 @@ namespace ec
 							stmp[np++] = c;
 					}
 				}
-				else if (c == '\n' || c == '\r') {
+				else if (c == '\n') {
 					stmp[np] = 0;
 					if (0 != (nerr = fun(nr, nc, stmp, true)))
 						break;
@@ -215,7 +215,7 @@ namespace ec
 				case ';':
 					while ((c = pf->getc()) != EOF) {
 						so += c;
-						if ('\n' == c)
+						if ('\n' == c || '\r' == c)
 							break;
 					}
 					key.clear();
