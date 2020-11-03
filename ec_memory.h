@@ -2,13 +2,16 @@
 \file ec_memory.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.10.25
 
 memory
 	fast memory allocator class for vector,hashmap etc.
 
 autobuf
 	buffer class auto free memory
+
+mem_sets
+	fast memory allocator
 
 eclib 3.0 Copyright (c) 2017-2018, kipway
 source repository : https://github.com/kipway
@@ -337,5 +340,117 @@ namespace ec {
 			_size = rsz;
 			return _pbuf;
 		}
+	};
+	template <class _CLS, size_t _Num>
+	class mem_sets
+	{
+	public:
+		class mem_item
+		{
+		public:
+			mem_item(size_t blksize, size_t blknum) :_blksize(blksize), _blknum(blknum)
+			{
+				_stack.reserve(_blknum);
+				_pbuf = (uint8_t*)::malloc(_blksize * _blknum);
+				if (_pbuf) {
+					for (size_t i = 0u; i < _blknum; i++)
+						_stack.push_back(_pbuf + i * _blksize);
+				}
+			}
+
+			bool _free(void *p)
+			{
+				if (size_t(p) >= (size_t)_pbuf && (size_t)p < (size_t)_pbuf + _blksize * _blknum) {
+					_stack.push_back(p);
+					return true;
+				}
+				return false;
+			}
+
+			void* _malloc()
+			{
+				if (_stack.empty())
+					return nullptr;
+				void *p = _stack.back();
+				_stack.pop_back();
+				return p;
+			}
+			~mem_item() {
+				if (_pbuf) {
+					::free(_pbuf);
+					_pbuf = nullptr;
+					_stack.clear();
+				}
+			}
+		private:
+			size_t _blksize;
+			size_t _blknum;
+			uint8_t* _pbuf;
+			std::vector<void*> _stack;
+		};
+
+	public:
+		mem_sets() :_pos(0)
+		{
+			_mems.reserve(2048);
+			_blksize = sizeof(_CLS);
+			if (_blksize % 8u)
+				_blksize += 8u - _blksize % 8u;
+			mem_item *pm = new mem_item(_blksize, _Num);
+			_mems.push_back(pm);
+		}
+
+		~mem_sets()
+		{
+			for (auto &i : _mems) {
+				if (i) {
+					delete i;
+					i = nullptr;
+				}
+			}
+		}
+		_CLS* newcls()
+		{
+			ec::unique_spinlock lck(&_cs);
+			void* pcls = nullptr;
+			for (; _pos < _mems.size(); _pos++) {
+				pcls = _mems[_pos]->_malloc();
+				if (pcls) {
+					new(pcls)_CLS();
+					return (_CLS*)pcls;
+				}
+			}
+			mem_item *pm = new mem_item(_blksize, _Num);
+			if (!pm)
+				return nullptr;
+			_mems.push_back(pm);
+			pcls = pm->_malloc();
+			if (pcls) {
+				new(pcls)_CLS();
+				return (_CLS*)pcls;
+			}
+			return nullptr;
+		}
+
+		bool freecls(_CLS* p)
+		{
+			ec::unique_spinlock lck(&_cs);
+			size_t i = 0u;
+			for (; i < _mems.size(); i++) {
+				if (_mems[i]->_free(p)) {
+					if (i < _pos)
+						_pos = i;
+					p->~_CLS();
+					return true;
+				}
+			}
+			return false;
+		}
+
+	private:
+		spinlock _cs;
+		size_t _blksize;
+		size_t _pos;
+		std::vector<mem_item*> _mems;
 	};
 }

@@ -2,7 +2,7 @@
 \file ec_netsrv_base.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.15
+\update 2020.11.3
 
 session class for net::server.
 
@@ -400,7 +400,8 @@ namespace ec
 					return 0;
 				int nsize = (int)(_sbuf.size() - _sndpos), ns = 0;
 				ns = tcpsend(_fd, _sbuf.data() + _sndpos, nsize, 2000);
-				_sndpos += ns;
+				if(ns > 0)
+					_sndpos += ns;
 				return (ns == nsize) ? ns : -1;
 			}
 

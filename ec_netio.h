@@ -2,7 +2,7 @@
 \file ec_netio.h
 \author	jiangyong
 \email  kipway@outlook.com
-update 2020.9.6
+update 2020.11.3
 
 functions for NET IO
 
@@ -31,6 +31,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #	include <arpa/inet.h>
 #	include <errno.h>
 #   include <netdb.h>
+#	include <poll.h>
 
 #ifndef SOCKET
 #	define SOCKET int
@@ -55,9 +56,59 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #endif
 
 #include <type_traits>
+#include "ec_string.h"
+#include "ec_time.h"
+
+#define MAX_XPOLLTCPSRV_THREADS 16
+#define NETIO_EVT_NONE 0
+#define NETIO_EVT_IN   1
+#define NETIO_EVT_OUT  2
+#define NETIO_EVT_ERR -1
 namespace ec
 {
 	namespace net {
+		template<typename SCK
+			, class = typename std::enable_if<std::is_same<SCK, SOCKET>::value>::type>
+			int io_wait(SCK s, int evt, int millisecond) // return NETIO_EVT_XXX
+		{
+#ifdef _WIN32
+			TIMEVAL tv01 = { millisecond / 1000, 1000 * (millisecond % 1000) };
+			int ne = 0;
+			fd_set fdr, fdw, fde;
+			FD_ZERO(&fdr);
+			FD_ZERO(&fdw);
+			FD_ZERO(&fde);
+			if (evt & NETIO_EVT_IN)
+				FD_SET(s, &fdr);
+			if (evt & NETIO_EVT_OUT)
+				FD_SET(s, &fdw);
+			FD_SET(s, &fde);
+			ne = ::select(0, (evt & NETIO_EVT_IN) ? &fdr : nullptr, (evt & NETIO_EVT_OUT) ? &fdw : nullptr, &fde, &tv01);
+			if (SOCKET_ERROR == ne || ((ne > 0) && FD_ISSET(s, &fde)))
+				return NETIO_EVT_ERR;
+			if (0 == ne)
+				return NETIO_EVT_NONE;
+			return (FD_ISSET(s, &fdr) ? NETIO_EVT_IN : 0) + (FD_ISSET(s, &fdw) ? NETIO_EVT_OUT : 0);
+#else
+			pollfd tfd;
+			tfd.fd = s;
+			tfd.events = 0;
+			tfd.revents = 0;
+			if (evt & NETIO_EVT_IN)
+				tfd.events |= POLLIN;
+			if (evt & NETIO_EVT_OUT)
+				tfd.events |= POLLOUT;
+			int ne = poll(&tfd, 1, millisecond);
+			if (ne < 0)
+				return NETIO_EVT_ERR;
+			if (ne == 0)
+				return NETIO_EVT_NONE;
+			if (tfd.revents & (POLLERR | POLLHUP | POLLNVAL)) // error
+				return NETIO_EVT_ERR;
+			return ((tfd.revents & POLLIN) ? NETIO_EVT_IN : 0) + ((tfd.revents & POLLOUT) ? NETIO_EVT_OUT : 0);
+#endif
+		}
+
 		template<typename SCK
 			, class = typename std::enable_if<std::is_same<SCK, SOCKET>::value>::type>
 			void tcpnodelay(SCK s)
@@ -113,9 +164,9 @@ namespace ec
 			bool setkeepalive(SCK s, bool bfast = false)
 		{
 			int keepAlive = 1;
-			int keepIdle = 20;
-			int keepInterval = 2;
-			int keepCount = 5;
+			int keepIdle = 30;
+			int keepInterval = 5;
+			int keepCount = 3;
 			if (bfast) {
 				keepIdle = 5;
 				keepInterval = 1;
@@ -144,8 +195,8 @@ namespace ec
 				alive_in.keepaliveinterval = 1000;
 			}
 			else {
-				alive_in.keepalivetime = 20 * 1000;
-				alive_in.keepaliveinterval = 2000;
+				alive_in.keepalivetime = 30 * 1000;
+				alive_in.keepaliveinterval = 5000;
 			}
 			alive_in.onoff = 1;
 			unsigned long ulBytesReturn = 0;
@@ -160,7 +211,7 @@ namespace ec
 
 		template<typename charT
 			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			SOCKET tcpconnect(const charT* sip, unsigned short suport, int nTimeOutSec, bool bFIONBIO = false)
+			SOCKET tcpconnect(const charT* sip, unsigned short suport, int seconds, bool bFIONBIO = false)
 		{
 			if (!sip || !*sip || !inet_addr(sip) || !suport)
 				return INVALID_SOCKET;
@@ -186,50 +237,44 @@ namespace ec
 				return INVALID_SOCKET;
 			}
 #endif
-			connect(s, (sockaddr *)(&ServerHostAddr), sizeof(ServerHostAddr));
-
-			TIMEVAL tv01 = { nTimeOutSec, 0 };
-			fd_set fdw;
-			FD_ZERO(&fdw);
-			FD_SET(s, &fdw);
-			int ne;
+			int nerr = connect(s, (sockaddr *)(&ServerHostAddr), sizeof(ServerHostAddr));
+			if (nerr == -1) {
 #ifdef _WIN32
-			ne = ::select(0, NULL, &fdw, NULL, &tv01);
+				int errcode = WSAGetLastError();
+				if (WSAEWOULDBLOCK != errcode) {
+					::closesocket(s);
+					return INVALID_SOCKET;
+				}
 #else
-			ne = ::select(s + 1, NULL, &fdw, NULL, &tv01);
+				int errcode = errno;
+				if (errcode != EAGAIN && errcode != EINPROGRESS) {
+					::closesocket(s);
+					return INVALID_SOCKET;
+				}
 #endif
-			if (ne <= 0 || !FD_ISSET(s, &fdw)) {
+			}
+			if (io_wait(s, NETIO_EVT_OUT, seconds * 1000) <= 0) {
 				::closesocket(s);
 				return  INVALID_SOCKET;
 			}
-			ul = 0;
-#ifdef _WIN32
 			if (!bFIONBIO) {
+				ul = 0;
+#ifdef _WIN32
 				if (SOCKET_ERROR == ioctlsocket(s, FIONBIO, (unsigned long*)&ul)) {
 					::closesocket(s);
 					return INVALID_SOCKET;
 				}
-			}
 #else
-			int serr = 0;
-			socklen_t serrlen = sizeof(serr);
-			getsockopt(s, SOL_SOCKET, SO_ERROR, (void *)&serr, &serrlen);
-			if (serr) {
-				::closesocket(s);
-				return INVALID_SOCKET;
-			}
-			if (!bFIONBIO) {
 				if (ioctl(s, FIONBIO, &ul) == -1) {
 					::closesocket(s);
 					return INVALID_SOCKET;
 				}
-			}
 #endif
-			return s;
+			}
 		}
 
 #ifndef _WIN32
-		inline SOCKET	afunix_connect(unsigned short uport, int nTimeOutSec, bool bFIONBIO = false)
+		inline SOCKET	afunix_connect(unsigned short uport, int seconds, const char* skey, bool bFIONBIO = false)
 		{
 			if (!uport)
 				return INVALID_SOCKET;
@@ -237,7 +282,7 @@ namespace ec
 			struct sockaddr_un srvaddr;
 			memset(&srvaddr, 0, sizeof(srvaddr));
 			srvaddr.sun_family = AF_UNIX;
-			snprintf(srvaddr.sun_path, sizeof(srvaddr.sun_path), "/var/tmp/ECIPC:%d", uport);
+			snprintf(srvaddr.sun_path, sizeof(srvaddr.sun_path), "/var/tmp/%s:%d", skey, uport);
 			SOCKET s = socket(AF_UNIX, SOCK_STREAM, 0);
 
 			if (s == INVALID_SOCKET)
@@ -250,103 +295,74 @@ namespace ec
 				return INVALID_SOCKET;
 			}
 
-			connect(s, (sockaddr *)(&srvaddr), sizeof(srvaddr));
-
-			TIMEVAL tv01 = { nTimeOutSec, 0 };
-			fd_set fdw;
-			FD_ZERO(&fdw);
-			FD_SET(s, &fdw);
-			int ne;
-
-			ne = ::select(s + 1, NULL, &fdw, NULL, &tv01);
-
-			if (ne <= 0 || !FD_ISSET(s, &fdw)) {
-				closesocket(s);
+			int nst = connect(s, (sockaddr *)(&srvaddr), sizeof(srvaddr));
+			if (nst == -1) {
+				int errcode = errno;
+				if (errcode != EAGAIN && errcode != EINPROGRESS) {
+					::closesocket(s);
+					return INVALID_SOCKET;
+				}
+			}
+			if (io_wait(s, NETIO_EVT_OUT, seconds * 1000) <= 0) {
+				::closesocket(s);
 				return  INVALID_SOCKET;
 			}
-			ul = 0;
 
-			int serr = 0;
-			socklen_t serrlen = sizeof(serr);
-			getsockopt(s, SOL_SOCKET, SO_ERROR, (void *)&serr, &serrlen);
-			if (serr) {
-				::closesocket(s);
-				return INVALID_SOCKET;
-			}
 			if (!bFIONBIO) {
+				ul = 0;
 				if (ioctl(s, FIONBIO, &ul) == -1) {
-					closesocket(s);
+					::closesocket(s);
 					return INVALID_SOCKET;
 				}
 			}
 			return s;
 		}
 #endif
+		template<typename SCK
+			, class = typename std::enable_if<std::is_same<SCK, SOCKET>::value>::type>
+			int _send_non_block(SCK s, const char* pbuf, int nsize)//return send bytes size or -1 for error,use for nonblocking
+		{
+			int  nret = 0;
+#ifdef _WIN32
+			nret = ::send(s, pbuf, nsize, 0);
+			if (SOCKET_ERROR == nret) {
+				int nerr = WSAGetLastError();
+				if (WSAEWOULDBLOCK == nerr || WSAENOBUFS == nerr)  // nonblocking  mode
+					return 0;
+			}
+#else
+			nret = ::send(s, pbuf, nsize, MSG_DONTWAIT | MSG_NOSIGNAL);
+			if (SOCKET_ERROR == nret) {
+				if (EAGAIN == errno || EWOULDBLOCK == errno) // nonblocking  mode
+					return 0;
+			}
+#endif
+			return nret;
+		};
 
 		//return send bytes size or -1 for error,use for block or nonblocking  mode
 		template<typename SCK
 			, class = typename std::enable_if<std::is_same<SCK, SOCKET>::value>::type>
-			int tcpsend(SCK s, const void* pbuf, int nsize, int ntimeoutmsec = 4000)
+			int tcpsend(SCK s, const void* pbuf, int nsize, int millisecond = 4000)
 		{
-			char *ps = (char*)pbuf;
-			int  nsend = 0, ns = 0;
-			int  nret;
-			while (nsend < nsize) {
-#ifdef _WIN32
-				nret = ::send(s, ps + nsend, nsize - nsend, 0);
-				if (SOCKET_ERROR == nret) {
-					int nerr = WSAGetLastError();
-					if (WSAEWOULDBLOCK == nerr || WSAENOBUFS == nerr) { // nonblocking  mode
-						TIMEVAL tv01 = { 0, 1000 * 100 };
-						fd_set fdw, fde;
-						FD_ZERO(&fdw);
-						FD_ZERO(&fde);
-						FD_SET(s, &fdw);
-						FD_SET(s, &fde);
-						if (-1 == ::select(0, NULL, &fdw, &fde, &tv01))
-							return SOCKET_ERROR;
-						if (FD_ISSET(s, &fde))
-							return SOCKET_ERROR;
-						ns++;
-						if (ns > ntimeoutmsec / 100 + 1)
-							return SOCKET_ERROR;
-						continue;
-					}
-					else
+			const char *ps = (const char*)pbuf;
+			int  nsend = 0;
+			int  nret, ne;
+			int64_t tend = 0, tcur = 0;
+			do {
+				nret = _send_non_block(s, ps + nsend, nsize - nsend);
+				if (nret < 0)
+					return SOCKET_ERROR;
+				nsend += nret;
+				if (nsend < nsize) {
+					ne = io_wait(s, NETIO_EVT_OUT, 100);
+					if (ne == NETIO_EVT_ERR)
 						return SOCKET_ERROR;
+					tcur = mstime();
+					if (!tend)
+						tend = tcur + millisecond;
 				}
-				else if (nret > 0) {
-					ns = 0;
-					nsend += nret;
-				}
-#else
-				nret = ::send(s, ps + nsend, nsize - nsend, MSG_DONTWAIT | MSG_NOSIGNAL);
-				if (SOCKET_ERROR == nret) {
-					if (errno == EAGAIN || errno == EWOULDBLOCK) { // nonblocking  mode
-						TIMEVAL tv01 = { 0, 1000 * 100 };
-						fd_set fdw, fde;
-						FD_ZERO(&fdw);
-						FD_ZERO(&fde);
-						FD_SET(s, &fdw);
-						FD_SET(s, &fde);
-						if (-1 == ::select(s + 1, NULL, &fdw, &fde, &tv01))
-							return SOCKET_ERROR;
-						if (FD_ISSET(s, &fde))
-							return SOCKET_ERROR;
-						ns++;
-						if (ns > ntimeoutmsec / 100 + 1) //4 secs
-							return SOCKET_ERROR;
-						continue;
-					}
-					else
-						return SOCKET_ERROR;
-				}
-				else if (nret > 0) {
-					nsend += nret;
-					ns = 0;
-				}
-#endif
-			}
+			} while (nsend < nsize && tcur < tend);
 			return nsend;
 		}
 
@@ -354,64 +370,50 @@ namespace ec
 			, class = typename std::enable_if<std::is_same<SCK, SOCKET>::value>::type>
 			int send_non_block(SCK s, const void* pbuf, int nsize)//return send bytes size or -1 for error,use for nonblocking
 		{
-			int  nret;
+			int  nret = 0;
 #ifdef _WIN32
 			if (nsize > 1024 * 32)
 				nsize = 1024 * 32;
-			nret = ::send(s, (char*)pbuf, nsize, 0);
+			nret = ::send(s, (const char*)pbuf, nsize, 0);
 			if (SOCKET_ERROR == nret) {
 				int nerr = WSAGetLastError();
 				if (WSAEWOULDBLOCK == nerr || WSAENOBUFS == nerr)  // nonblocking  mode
 					return 0;
-				else
-					return SOCKET_ERROR;
 			}
-			return nret;
 #else
-			nret = ::send(s, (char*)pbuf, nsize, MSG_DONTWAIT | MSG_NOSIGNAL);
+			nret = ::send(s, (const char*)pbuf, nsize, MSG_DONTWAIT | MSG_NOSIGNAL);
 			if (SOCKET_ERROR == nret) {
-				if (errno == EAGAIN || errno == EWOULDBLOCK) // nonblocking  mode
+				if (EAGAIN == errno || EWOULDBLOCK == errno) // nonblocking  mode
 					return 0;
-				else
-					return SOCKET_ERROR;
 			}
-			return nret;
 #endif
+			return nret;
 		};
 
 		template<typename SCK
 			, class = typename std::enable_if<std::is_same<SCK, SOCKET>::value>::type>
-			int tcpread(SCK s, void* pbuf, int nbufsize, int nTimeOutMsec)
+			int tcpread(SCK s, void* pbuf, int nbufsize, int millisecond)
 		{
 			if (s == INVALID_SOCKET)
 				return SOCKET_ERROR;
+			int ne = io_wait(s, NETIO_EVT_IN, millisecond);
+			if (ne <= 0)
+				return ne;
 
-			TIMEVAL tv01 = { nTimeOutMsec / 1000, 1000 * (nTimeOutMsec % 1000) };
-			fd_set fdr, fde;
-			FD_ZERO(&fdr);
-			FD_ZERO(&fde);
-			FD_SET(s, &fdr);
-			FD_SET(s, &fde);
-
+			int nr = ::recv(s, (char*)pbuf, nbufsize, 0);
+			if (nr == 0) // close
+				return SOCKET_ERROR;
+			else if (nr < 0) {
 #ifdef _WIN32
-			int nRet = ::select(0, &fdr, NULL, &fde, &tv01);
+				int nerr = (int)WSAGetLastError();
+				if (WSAEWOULDBLOCK == nerr)
+					return 0;
 #else
-			int nRet = ::select(s + 1, &fdr, NULL, &fde, &tv01);
+				if (EAGAIN == errno || EWOULDBLOCK == errno)
+					return 0;
 #endif
-
-			if (SOCKET_ERROR == nRet)
-				return SOCKET_ERROR;
-
-			if (nRet == 0)
-				return 0;
-			if (FD_ISSET(s, &fde))
-				return SOCKET_ERROR;
-
-			nRet = ::recv(s, (char*)pbuf, nbufsize, 0);
-
-			if (nRet <= 0)
-				return SOCKET_ERROR;
-			return nRet;
+			}
+			return nr;
 		}
 
 		template<typename charT
@@ -534,5 +536,46 @@ namespace ec
 			}
 			return -1;
 		}
+		/*!
+		parse url
+		demo:
+		udp://0.0.0.0:999
+		*/
+		class url
+		{
+		public:
+			url() :_port(0) {
+			}
+			bool parse(const char *surl, size_t urlsize)
+			{
+				ec::strargs ss;
+				ec::strsplit(":/", surl, urlsize, ss, 3);
+				if (ss.size() < 2)
+					return false;
+				_protocol.clear();
+				_ip.clear();
+
+				_protocol.append(ss[0]._str, ss[0]._size);
+				if (ss.size() > 2) {
+					_port = ss[2].stoi();
+					if (!_port)
+						return false;
+				}
+				else
+					_port = 0;
+
+				_ip.append(ss[1]._str, ss[1]._size);
+				if (INADDR_NONE == inet_addr(_ip.c_str())) {
+					std::string t = _ip;
+					if (ec::net::get_ip_by_domain(t.c_str(), _ip) < 0)
+						return false;
+				}
+				return true;
+			}
+		public:
+			uint16_t _port;
+			std::string _protocol;
+			std::string _ip;
+		};
 	}//net
 }// ec

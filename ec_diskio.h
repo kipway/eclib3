@@ -172,7 +172,7 @@ namespace ec
 		}
 
 		template<class _Out>
-		void getappname(_Out &utf8name)
+		bool getappname(_Out &utf8name)
 		{
 			wchar_t sFilename[512];
 			wchar_t sDrive[_MAX_DRIVE];
@@ -186,8 +186,9 @@ namespace ec
 			char sutf8[_MAX_FNAME * 3];
 			sutf8[0] = 0;
 			if (!WideCharToMultiByte(CP_UTF8, 0, sFname, -1, sutf8, (int)sizeof(sutf8), NULL, NULL))
-				return;
+				return false;
 			utf8name = sutf8;
+			return true;
 		}
 
 		template<class _Out>
@@ -348,7 +349,7 @@ namespace ec
 		}
 
 		template<class _Out>
-		void getexepath(_Out &spath) // last char is '/'
+		bool getexepath(_Out &spath) // last char is '/'
 		{
 			char sopath[1024] = { 0 };
 			int n = readlink("/proc/self/exe", sopath, sizeof(sopath) - 1);
@@ -359,16 +360,18 @@ namespace ec
 			if (n > 0 && sopath[n - 1] != '/')
 				strcat(sopath, "/");
 			spath = sopath;
+			return true;
 		}
 
 		template<class _Out>
-		void getappname(_Out &appname) //
+		bool getappname(_Out &appname) //
 		{
 			char sopath[1024] = { 0, };
 			int n = readlink("/proc/self/exe", sopath, sizeof(sopath) - 1);
 			while (n > 0 && sopath[n - 1] != '/')
 				n--;
 			appname = &sopath[n];
+			return true;
 		}
 
 		inline bool lock(int nfd, long long offset, long long lsize, bool bwrite)

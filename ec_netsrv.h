@@ -2,7 +2,7 @@
 \file ec_netsrv.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.15
+\update 2020.10.12
 
 net::server
 	a class for TCP/UDP, HTTP/HTTPS, WS/WSS
@@ -499,6 +499,9 @@ namespace ec
 			virtual void onpoll_once()
 			{
 			}
+			virtual void onpoll_onefd()
+			{
+			}
 			virtual bool hasprotocol(uint32_t srvid, uint32_t uprotoc)
 			{
 				return true;
@@ -527,7 +530,7 @@ namespace ec
 			uint32_t nextid()
 			{
 				_unextid++;
-				if (_unextid < UCID_DYNAMIC_START)
+				if (_unextid < UCID_DYNAMIC_START || _unextid >= INT32_MAX)
 					_unextid = UCID_DYNAMIC_START;
 				while (_map.get(_unextid)) {
 					_unextid++;
@@ -620,6 +623,7 @@ namespace ec
 				pollfd* p = _pollfd.data();
 				uint32_t* puid = _pollkey.data();
 				for (auto i = 0u; i < _pollfd.size(); i++) {
+					onpoll_onefd();
 					if (0u == i) { // evtfd
 						if (p[0].revents & POLLIN) {
 							_evtfd.reset_event();

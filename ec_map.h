@@ -2,7 +2,7 @@
 \file ec_hashmap.h
 \author jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.10.28
 
 hashmap
 	A hash map class, incompatible with std::unordered_map.
@@ -132,7 +132,7 @@ namespace ec
 			, _uhashsize(uhashsize)
 			, _usize(0)
 		{
-			_pmem = new ec::memory(size_node(), uhashsize + 8);
+			_pmem = new ec::memory(size_node(), uhashsize * 2);
 			_ppv = new t_node*[_uhashsize];
 			if (nullptr == _ppv)
 				return;

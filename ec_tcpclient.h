@@ -2,7 +2,7 @@
 \file ec_tcpclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.11.3
 
 tcp_c
 	a class for tcp client, support socks5 proxy, asynchronous connection
@@ -212,8 +212,10 @@ namespace ec
 	private:
 		void connectfailed()
 		{
-			::closesocket(_sock);
-			_sock = INVALID_SOCKET;
+			if (INVALID_SOCKET != _sock) {
+				::closesocket(_sock);
+				_sock = INVALID_SOCKET;
+			}
 			_status = st_invalid;
 			onconnectfailed();
 		}
@@ -325,53 +327,29 @@ namespace ec
 				onreadbytes(sbuf, nr);
 		}
 
-		void doconnect(int nmsec)
+		void doconnect(int millisecond)
 		{
-			TIMEVAL tv01 = { nmsec / 1000, 1000 * (nmsec % 1000) };
-			fd_set fdw, fde;
-			FD_ZERO(&fdw);
-			FD_ZERO(&fde);
-			FD_SET(_sock, &fdw);
-			FD_SET(_sock, &fde);
-			int ne;
-#ifdef _WIN32
-			ne = ::select(0, NULL, &fdw, &fde, &tv01);
-#else
-			ne = ::select(_sock + 1, NULL, &fdw, &fde, &tv01);
-#endif
-			if (ne < 0 || FD_ISSET(_sock, &fde)) {
-				connectfailed();
+			if (INVALID_SOCKET == _sock)
 				return;
-			}
-			if (!ne || !FD_ISSET(_sock, &fdw)) {
-				if (::time(nullptr) - _timeconnect > _timeover_connect_sec) { //timeover
+			int ne = net::io_wait(_sock, NETIO_EVT_OUT, millisecond);
+			if (NETIO_EVT_ERR == ne)
+				connectfailed();
+			else if (NETIO_EVT_NONE == ne) {
+				if (::time(nullptr) - _timeconnect > _timeover_connect_sec) //timeover
 					connectfailed();
+			}
+			else {//connect success
+				if (_s5domain[0] && _uport) {
+					if (!sendsock5handshake()) {
+						connectfailed();
+						return;
+					}
+					_status = st_s5handshake;
 					return;
 				}
-				return; //continue wait
+				_status = st_connected;
+				onconnected();
 			}
-
-#ifndef _WIN32
-			int serr = 0;
-			socklen_t serrlen = sizeof(serr);
-			getsockopt(_sock, SOL_SOCKET, SO_ERROR, (void *)&serr, &serrlen);
-			if (serr) {
-				connectfailed();
-				return;
-			}
-#endif
-			//connect success
-			if (_s5domain[0] && _uport) {
-				if (!sendsock5handshake()) {
-					connectfailed();
-					return;
-				}
-				_status = st_s5handshake;
-				return;
-			}
-
-			_status = st_connected;
-			onconnected();
 		}
 	};
 }
