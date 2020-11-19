@@ -35,7 +35,7 @@ namespace std
 
 #if (0 != USE_EC_STRING)
 #define DEFINE_EC_STRING_ALLOCTOR 	ec::spinlock ec_stringspinlock;\
-	ec::memory ec_stringallocator(48, 4096, 128, 2048, 512, 1024, &ec_stringspinlock);\
+	ec::memory ec_stringallocator(48, 16384, 128, 8192, 512, 2048, &ec_stringspinlock);\
 	ec::memory* p_ec_string_allocator = &ec_stringallocator;
 
 #define DEFINE_EC_STRING_ALLOCTOR_ARM 	ec::spinlock ec_stringspinlock;\

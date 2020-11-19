@@ -322,6 +322,7 @@ namespace ec
 					exit(4);
 					return 4;
 				}
+				CloseIO();
 				_pcls = pcls;
 				msg.snd("Start success!\n\n");
 				msg.snd("finished");

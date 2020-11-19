@@ -2,7 +2,7 @@
 \file ec_protobuf.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.11.17
 
 classes to encode/decode google protocol buffer,support proto3
 
@@ -462,7 +462,7 @@ namespace ec
 		{
 			if (!s || !*s || !size)
 				return 0;
-			return size_key(id, pb_length_delimited) + size_length_delimited(strlen(s));
+			return size_key(id, pb_length_delimited) + size_length_delimited(size);
 		}
 
 		inline size_t size_cls(uint32_t id, const void* pcls, size_t size) const

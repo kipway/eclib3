@@ -2,7 +2,7 @@
 \file ec_time.h
 \author	jiangyong
 \email	kipway@outlook.com
-\update 2020.9.15
+\update 2020.11.15
 
 cTime
 	wrapper class for time
@@ -159,15 +159,12 @@ namespace ec
 		void SetTime(int nyear, int nmon, int nday)
 		{
 			struct tm t;
-			time_t tmp = ::time(NULL);
-			t = *localtime(&tmp);
+			memset(&t, 0, sizeof(t));
 			t.tm_year = nyear - 1900;
 			t.tm_mon = nmon - 1;
 			t.tm_mday = nday;
-			t.tm_hour = 0;
-			t.tm_min = 0;
-			t.tm_sec = 0;
 			_gmt = mktime(&t);
+
 			_year = nyear;
 			_mon = nmon;
 			_day = nday;
@@ -178,8 +175,7 @@ namespace ec
 		void SetTime(int nyear, int nmon, int nday, int nhour, int nmin, int nsec)
 		{
 			struct tm t;
-			time_t tmp = ::time(NULL);
-			t = *localtime(&tmp);
+			memset(&t, 0, sizeof(t));
 			t.tm_year = nyear - 1900;
 			t.tm_mon = nmon - 1;
 			t.tm_mday = nday;
