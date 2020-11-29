@@ -2,7 +2,7 @@
 \file ec_tcpclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.11.3
+\update 2020.11.23
 
 tcp_c
 	a class for tcp client, support socks5 proxy, asynchronous connection
@@ -29,7 +29,8 @@ namespace ec
 			st_connect = 1, // connecting...
 			st_s5handshake = 2,  // socks5 handshake...
 			st_s5request = 3,  // socks5 requesting...
-			st_connected = 4   // connected
+			st_connected = 4,   // connected
+			st_logined
 		};
 	protected:
 		st_sock	_status;
@@ -151,7 +152,7 @@ namespace ec
 
 		virtual int sendbytes(const void* p, int nlen)
 		{
-			if (INVALID_SOCKET == _sock || st_connected != _status)
+			if (INVALID_SOCKET == _sock || _status < st_connected)
 				return -1;
 			int ns = net::tcpsend(_sock, p, nlen);
 			if (ns < 0)
@@ -205,7 +206,7 @@ namespace ec
 				dosocks5handshake(nmsec);
 			else if (st_s5request == _status)
 				dosocks5request(nmsec);
-			else if (st_connected == _status)
+			else
 				doread(nmsec);
 		}
 

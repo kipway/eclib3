@@ -2,7 +2,7 @@
 \file ec_vector.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.20
+\update 2020.11.29
 
 vector
 	a extend vector class for trivially copyable type, and expanded some functions, can be used as string, stack, stream
@@ -78,6 +78,21 @@ namespace ec
 			append(v.data(), v.size());
 		}
 
+		vector(vector &&v) // for move
+		{
+			_pbuf = v._pbuf;
+			_pos = v._pos;
+			_usize = v._usize;
+			_ubufsize = v._ubufsize;
+			_pmem = v._pmem;
+
+			v._pbuf = nullptr;
+			v._pos = 0;
+			v._usize = 0;
+			v._ubufsize = 0;
+			v._pmem = nullptr;
+		}
+
 		~vector()
 		{
 			if (_pbuf != nullptr) {
@@ -93,6 +108,25 @@ namespace ec
 		{
 			clear();
 			append(v.data(), v.size());
+			return *this;
+		}
+
+		vector& operator = (vector&& v) // for move
+		{
+			this->~vector();
+
+			_pbuf = v._pbuf;
+			_pos = v._pos;
+			_usize = v._usize;
+			_ubufsize = v._ubufsize;
+			_pmem = v._pmem;
+
+			v._pbuf = nullptr;
+			v._pos = 0;
+			v._usize = 0;
+			v._ubufsize = 0;
+			v._pmem = nullptr;
+
 			return *this;
 		}
 
