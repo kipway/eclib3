@@ -2,7 +2,7 @@
 \file ec_log.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.12.7
 
 ilog
 	A client log base class
@@ -99,6 +99,8 @@ namespace ec
 		}
 		int open(const char* str) // "udp://127.0.0.1:999/cabin"
 		{
+			if (!str || !*str)
+				return -1;
 			str80 sip;
 			ec::strargs args;
 			if (4 != ec::strsplit(":/", str, strlen(str), args, 4))

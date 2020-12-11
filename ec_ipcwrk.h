@@ -2,7 +2,7 @@
 \file ec_ipcwrk.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.10.29
+\update 2020.12.5
 
 net::ipcwrk
 	a base class for AF_UNIX IPC worker
@@ -76,6 +76,7 @@ namespace ec {
 		virtual void onconnect() = 0;
 		virtual int  onrecv(const uint8_t *pdata, size_t size) = 0; // return 0:ok; -1:error need close
 		virtual void onidle() = 0;
+		virtual void onreadonce() {};
 
 	private:
 		bool connectasyn() {
@@ -209,31 +210,34 @@ namespace ec {
 			}
 			else if (_pollfd.revents & POLLIN) {
 				char rbuf[1024 * 32];
+				while (1) {
 #ifdef _WIN32
-				int nr = ::recv(_pollfd.fd, rbuf, (int)sizeof(rbuf), 0);
+					int nr = ::recv(_pollfd.fd, rbuf, (int)sizeof(rbuf), 0);
 #else
-				int nr = ::recv(_pollfd.fd, rbuf, (int)sizeof(rbuf), MSG_DONTWAIT);
+					int nr = ::recv(_pollfd.fd, rbuf, (int)sizeof(rbuf), MSG_DONTWAIT);
 #endif
-				if (nr == 0) {   //close gracefully
-					closefd();
-					return;
-				}
-				else if (nr < 0) {
+					if (nr == 0) {   //close gracefully
+						closefd();
+						return;
+					}
+					else if (nr < 0) {
 #ifdef _WIN32
-					int nerr = (int)WSAGetLastError();
-					if (WSAEWOULDBLOCK == nerr)
-						return;
+						int nerr = (int)WSAGetLastError();
+						if (WSAEWOULDBLOCK == nerr)
+							return;
 #else
-					int nerr = errno;
-					if (nerr == EAGAIN || nerr == EWOULDBLOCK)
-						return;
+						int nerr = errno;
+						if (nerr == EAGAIN || nerr == EWOULDBLOCK)
+							return;
 #endif
-					closefd();
-					return;
-				}
-				if (-1 == onrecv((const uint8_t*)rbuf, nr)) {
-					closefd();
-					return;
+						closefd();
+						return;
+					}
+					if (-1 == onrecv((const uint8_t*)rbuf, nr)) {
+						closefd();
+						return;
+					}
+					onreadonce();
 				}
 			}
 			if (_nst)

@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.20
+\update 2020.12.10
 
 string , bytes and string functions
 
@@ -305,7 +305,7 @@ namespace ec
 		return true;
 	}
 
-	template<class  _Str>
+	template<class  _Str = std::string>
 	int url2utf8(const char* url, _Str &so)
 	{ //utf8 fomat url translate to utf8 string
 		unsigned char h, l;
@@ -329,7 +329,7 @@ namespace ec
 		return (int)so.size();
 	}
 
-	template<class _Str>
+	template<class _Str = std::string>
 	int utf82url(const char* url, _Str &so)
 	{ //utf8 string -> url
 		unsigned char h, l, *p = (unsigned char*)url;
@@ -546,8 +546,8 @@ namespace ec
 #endif
 	}
 
-	template <class _Str>
-	int gbk2utf8_s(const char* in, size_t sizein, _Str &sout)
+	template <class _Str = std::string>
+	int gbk2utf8_s(const char* in, size_t sizein, _Str &sout) // return sout.zize() or -1 error;
 	{
 		if (sizein * 3 >= 16384)
 			return -1;
@@ -564,7 +564,27 @@ namespace ec
 		return n;
 	}
 
-	template <class _Str>
+	template <class _Str = std::string>
+	int gbk2utf8_s(_Str &s) // return s.zize() or -1 error;
+	{
+		if (s.empty() || strisutf8(s.data(), s.size()))
+			return (int)s.size();
+		if (s.size() * 3 >= 16384)
+			return -1;
+		char tmp[16384];
+		int n = gbk2utf8(s.data(), s.size(), tmp, sizeof(tmp));
+		if (n < 0)
+			return -1;
+		try {
+			s.assign(tmp, n);
+		}
+		catch (...) {
+			return -1;
+		}
+		return n;
+	}
+
+	template <class _Str = std::string>
 	int utf82gbk_s(const char* in, size_t sizein, _Str &sout)
 	{
 		if (sizein >= 16384)
@@ -702,7 +722,7 @@ namespace ec
 		return so;
 	}
 
-	template<class _STR>
+	template<class _STR = std::string>
 	void formatpath(_STR &s)
 	{
 		if (s.empty())
@@ -716,7 +736,7 @@ namespace ec
 			s.push_back('/');
 	}
 
-	template<class _Out>
+	template<class _Out = strargs>
 	int strsplit(const char* split, const char* src, size_t srcsize, _Out& out, int maxitems = 0)
 	{ // return	number of t_str in out
 		out.clear();
