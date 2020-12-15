@@ -2,7 +2,7 @@
 \file ec_diskio.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.15
+\update 2020.12.14
 
 io
 	tools for disk IO，use utf-8 parameters
@@ -203,11 +203,14 @@ namespace ec
 			GetModuleFileNameW(NULL, sFilename, sizeof(sFilename) / sizeof(wchar_t));
 			_wsplitpath(sFilename, sDrive, sDir, sFname, sExt);
 
+			char sdrv[8] = { 0 };
 			char sutf8[_MAX_DIR * 3];
 			sutf8[0] = 0;
-			if (!WideCharToMultiByte(CP_UTF8, 0, sDir, -1, sutf8, (int)sizeof(sutf8), NULL, NULL))
+			if (!WideCharToMultiByte(CP_UTF8, 0, sDrive, -1, sdrv, (int)sizeof(sdrv), NULL, NULL)
+				||!WideCharToMultiByte(CP_UTF8, 0, sDir, -1, sutf8, (int)sizeof(sutf8), NULL, NULL))
 				return false;
-			utf8path = sutf8;
+			utf8path = sdrv;
+			utf8path += sutf8;
 			for (auto &i : utf8path) {
 				if (i == '\\')
 					i = '/';

@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.10
+\update 2020.12.14
 
 string , bytes and string functions
 
@@ -761,5 +761,84 @@ namespace ec
 			out.push_back(t);
 		}
 		return (int)out.size();
+	}
+
+	/*!
+		\brief filter string
+
+		sfliter support *?
+		\param ssrc [in] src
+		\param sfliter [in] filter str
+		\return true success
+		*/
+	template<typename charT
+		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+		bool strfilter(const charT *ssrc, const charT *sfliter)
+	{
+		char ssub[512], cp = 0;
+		char *ps = ssub, *ss = (char *)ssrc, *sf = (char *)sfliter;
+		if (!ss || !sf || *sf == 0)
+			return true;
+		if ((*sf == '*') && (*(sf + 1) == 0))
+			return true;
+		while ((*sf) && (*ss)) {
+			if (*sf == '*') {
+				if (ps != ssub) {
+					*ps = 0;
+					ss = strstr(ss, ssub);
+					if (!ss)
+						return false;
+					ss += (ps - ssub);
+					ps = ssub;
+				}
+				cp = '*';
+				sf++;
+			}
+			else if (*sf == '?') {
+				if (ps != ssub) {
+					*ps = 0;
+					ss = strstr(ss, ssub);
+					if (!ss)
+						return false;
+					ss += (ps - ssub);
+					ps = ssub;
+				}
+				ps = ssub;
+				cp = '?';
+				ss++;
+				sf++;
+			}
+			else {
+				if (cp == '*')
+					*ps++ = *sf++;
+				else {
+					if (*sf != *ss)
+						return false;
+					sf++;
+					ss++;
+				}
+			}
+		}//while
+		if (cp != '*') {
+			if (*ss == *sf)
+				return true;
+			if (*sf == '*') {
+				sf++;
+				if (*sf == 0)
+					return true;
+			}
+			return false;
+		}
+		if (ps != ssub) {
+			*ps = 0;
+			ss = strstr(ss, ssub);
+			if (!ss)
+				return false;
+			ss += (ps - ssub);
+			if (!*ss)
+				return true;
+			return false;
+		}
+		return true;
 	}
 }// namespace ec
