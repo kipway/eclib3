@@ -2,7 +2,7 @@
 \file ec_vector.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.11.29
+\update 2020.12.17
 
 vector
 	a extend vector class for trivially copyable type, and expanded some functions, can be used as string, stack, stream
@@ -540,6 +540,13 @@ namespace ec
 			return append((const value_type*)s, strlen(s));
 		}
 
+		inline vector &append(const std::string &s)
+		{
+			if (s.empty())
+				return *this;
+			return append((const value_type*)s.data(), s.size() / sizeof(_Tp));
+		}
+
 		template<typename T
 			, class = typename std::enable_if<sizeof(_Tp) == 1 && (std::is_arithmetic<T>::value || std::is_void<T>::value)>::type >
 			inline vector &append(const T* p, size_t size)
@@ -591,6 +598,11 @@ namespace ec
 		inline vector& operator+= (const vector &v)
 		{
 			return append(v.data(), v.size());
+		}
+
+		inline vector& operator+= (const std::string &s)
+		{
+			return append(s);
 		}
 
 #ifdef _WIN32

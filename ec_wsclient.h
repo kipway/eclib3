@@ -2,7 +2,7 @@
 \file ec_wsclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2020.12.17
 
 ws_c
 	class for websocket client
@@ -357,8 +357,8 @@ namespace ec
 		int _nstatus;// 0: none handshaked;  1:handshaked
 	protected:
 		memory* _pmem;
-	private:
 		ilog* _plog;
+	private:
 		bytes _rbuf;
 		websocketclient _ws;
 

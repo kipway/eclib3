@@ -1,7 +1,7 @@
 ﻿/*!
 \file ec_recfile.h
 \author	kipway@outlook.com
-\update 2020.12.12
+\update 2020.12.16
 
 eclib file class
 
@@ -93,6 +93,7 @@ namespace ec
 			_filesize = 0;
 			_errcode = 0;
 			memset(_tmpblk, 0, sizeof(_tmpblk));
+			flush_flag = 0;
 		}
 		virtual ~record_file() {
 			if (_pgtab) {
@@ -125,6 +126,7 @@ namespace ec
 		long long _filesize; // file size
 		uint8_t _tmpblk[RFL_MAXBLKSIZE]; //temp block buffer
 		int   _errcode; //error code
+		int   flush_flag; // Non-zero: need flush;
 	private:
 		uint32_t sizepagetable()
 		{
@@ -247,8 +249,8 @@ namespace ec
 				}
 
 				memset(_pgtab, 0, sizepagetable());
-				flush();
 				_filesize = Seek(0, seek_end);
+				flush();
 				break;
 			}
 			_errcode = 0;
@@ -386,7 +388,6 @@ namespace ec
 				_errcode = RFLE_PARAM;
 				return RFL_ERR_POS;
 			}
-
 			_errcode = RFLE_FILEIO;
 			uint32_t upos = pos; // alloc page if need
 			if (RFL_ADD_POS == pos) {
@@ -395,31 +396,34 @@ namespace ec
 			}
 
 			uint8_t *rh = _tmpblk; // add record head
-			memset(rh, 0, 8);
+			memset(rh, 0, RFILE_REC_HEAD_SZIE);
 			rh[4] = static_cast<uint8_t>(size & 0xFF);
 			rh[5] = static_cast<uint8_t>(size >> 8);
 			rh[7] = rh[4] ^ rh[5];
-			memcpy(rh + 8, prec, size);
+			memcpy(rh + RFILE_REC_HEAD_SZIE, prec, size);
 
-			int nw = 0; // write record
-			Lock(RFL_HEADSIZE + sizepagetable() + upos * _sizeblk, _sizeblk, true);
-			nw = WriteTo(RFL_HEADSIZE + sizepagetable() + upos * _sizeblk, rh, _sizeblk);
-			Unlock(RFL_HEADSIZE + sizepagetable() + upos * _sizeblk, _sizeblk);
-			if (nw != (int)_sizeblk) {
+			int nw = 0, nsize; // write record
+			long long lpos = RFL_HEADSIZE + sizepagetable() + upos * (long long)_sizeblk;
+
+			Lock(lpos, _sizeblk, true);
+			if (lpos + _sizeblk > _filesize)
+				nsize = (int)_sizeblk; // append one block
+			else
+				nsize = (int)size + RFILE_REC_HEAD_SZIE; // write only data
+			nw = WriteTo(lpos, rh, nsize);
+			Unlock(lpos, _sizeblk);
+
+			if (nw != nsize) {
 				if (RFL_ERR_POS == pos)
 					free_page(upos);
 				_errcode = RFLE_FILEIO;
 				return RFL_ERR_POS;
 			}
-
-			long long lcurpos = Seek(0, seek_cur);
-			if (lcurpos > _filesize) {
-				long long lsize = Seek(0, seek_end);
-				if (lsize > _filesize) {
-					flush();
-					_filesize = lsize;
-				}
+			if (lpos + _sizeblk > _filesize) {
+				_filesize = lpos + _sizeblk;
+				flush_flag = 1;
 			}
+
 			_errcode = 0;
 			return upos;
 		}
@@ -431,6 +435,18 @@ namespace ec
 
 		inline int getlasterror() {
 			return _errcode;
+		}
+
+		void flushend()
+		{
+			if (!flush_flag)
+				return;
+			long long lsize = Seek(0, seek_end);
+			if (lsize > 0) {
+				File::flush();
+				_filesize = lsize;
+				flush_flag = 0;
+			}
 		}
 	};
 }//namespace ec
