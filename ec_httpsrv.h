@@ -3,7 +3,7 @@
 
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.15
+\update 2020.12.26
 
 httpsrv
 	class for http/https server
@@ -119,7 +119,7 @@ namespace ec
 				if (plog->getlevel() < loglevel)
 					return;
 				try {
-					string vs(_pmem);
+					vector<char> vs(_pmem);
 					vs.reserve(4096);
 					for (auto &i : ph->_head) {
 						vs += '\t';
@@ -159,7 +159,7 @@ namespace ec
 						httpreterr(ucid, http_sret404, 404);
 						return pPkg->HasKeepAlive();
 					}
-					string answer(_pmem);
+					vector<char> answer(_pmem);
 					answer.reserve(1024 * 4);
 
 					answer += "HTTP/1.1 200 ok\r\nServer: eclib web server\r\n";
@@ -185,7 +185,7 @@ namespace ec
 			bool downfile(uint32_t ucid, http::package* pPkg, const char* sfile)
 			{
 				try {
-					string data(_pmem);
+					vector<char> data(_pmem);
 					data.reserve(1024 * 32);
 					if (!ec::io::lckread(sfile, &data) || !data.size()) {
 						httpreterr(ucid, ec::http_sret404, 404);
@@ -205,7 +205,7 @@ namespace ec
 			{
 				try {
 					str1k tmp;
-					string answer(_pmem);
+					vector<char> answer(_pmem);
 					answer.reserve(1024 * 32);
 
 					answer += "HTTP/1.1 206 Partial Content\r\nServer: eclib web server\r\n";
@@ -222,7 +222,7 @@ namespace ec
 					else
 						answer += "Content-type: application/octet-stream\r\n";
 
-					string filetmp(_pmem);
+					vector<char> filetmp(_pmem);
 					filetmp.reserve(1024 * 32);
 					if (!io::lckread(sfile, &filetmp, lpos, lsize)) {
 						httpreterr(ucid, ec::http_sret404, 404);

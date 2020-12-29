@@ -2,7 +2,7 @@
 \file ec_diskio.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.14
+\update 2020.12.26
 
 io
 	tools for disk IO，use utf-8 parameters
@@ -351,8 +351,8 @@ namespace ec
 			return (long long)freeDisk;
 		}
 
-		template<class _Out>
-		bool getexepath(_Out &spath) // last char is '/'
+		template<class _String>
+		bool getexepath(_String &spath) // last char is '/'
 		{
 			char sopath[1024] = { 0 };
 			int n = readlink("/proc/self/exe", sopath, sizeof(sopath) - 1);
@@ -366,8 +366,8 @@ namespace ec
 			return true;
 		}
 
-		template<class _Out>
-		bool getappname(_Out &appname) //
+		template<class _String>
+		bool getappname(_String &appname) //
 		{
 			char sopath[1024] = { 0, };
 			int n = readlink("/proc/self/exe", sopath, sizeof(sopath) - 1);
@@ -551,7 +551,7 @@ namespace ec
 				return false;
 			struct dirent *d = readdir(dir);
 			if (d) {
-				utf8out = d->d_name;
+				utf8out = (const char*)d->d_name;
 				if (pisdir)
 					*pisdir = (d->d_type == DT_DIR) ? 1 : 0;
 				return true;

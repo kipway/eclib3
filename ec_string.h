@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.14
+\update 2020.12.26
 
 string , bytes and string functions
 
@@ -33,14 +33,31 @@ namespace std
 
 #define WIN_CP_GBK  936
 
+#ifndef EC_STR_SML_SIZE
+#define EC_STR_SML_SIZE 80
+#endif
+#ifndef EC_STR_SML_NUMS
+#define EC_STR_SML_NUMS (1024 * 128) //8M
+#endif
+
+#ifndef EC_STR_MED_SIZE
+#define EC_STR_MED_SIZE 256
+#endif
+#ifndef EC_STR_MED_NUMS
+#define EC_STR_MED_NUMS (1024 * 32)  //8M
+#endif
+
+#ifndef EC_STR_LRG_SIZE
+#define EC_STR_LRG_SIZE 1024
+#endif
+#ifndef EC_STR_LRG_NUMS
+#define EC_STR_LRG_NUMS (1024 * 8)   //8M
+#endif
+
 #if (0 != USE_EC_STRING)
 #define DEFINE_EC_STRING_ALLOCTOR 	ec::spinlock ec_stringspinlock;\
-	ec::memory ec_stringallocator(48, 16384, 128, 8192, 512, 2048, &ec_stringspinlock);\
+	ec::memory ec_stringallocator(EC_STR_SML_SIZE, EC_STR_SML_NUMS, EC_STR_MED_SIZE, EC_STR_MED_NUMS, EC_STR_LRG_SIZE, EC_STR_LRG_NUMS, &ec_stringspinlock);\
 	ec::memory* p_ec_string_allocator = &ec_stringallocator;
-
-#define DEFINE_EC_STRING_ALLOCTOR_ARM 	ec::spinlock ec_stringspinlock;\
-	ec::memory ec_stringallocator(48, 1024, 128, 512, 256, 128, &ec_stringspinlock);\
-	ec::memory* p_ec_string_allocator = &ec_stringallocator;\
 
 extern ec::memory* p_ec_string_allocator;
 struct ec_string_alloctor {
@@ -53,10 +70,6 @@ struct ec_string_alloctor {
 
 namespace ec
 {
-#if (0 != USE_EC_STRING)
-	using string = vector<char, ec_string_alloctor>;
-#endif
-
 	using bytes = vector<unsigned char>;
 
 	using str32 = array<char, 32>;
@@ -68,6 +81,555 @@ namespace ec
 	using str1k = array<char, 1024>;
 
 	using strargs = array<txt, 128>; //for ec::strsplit  out buffer
+
+	struct null_stralloctor {
+		ec::memory* operator()()
+		{
+			return nullptr; // user ::malloc() and ::free()
+		}
+	};
+
+	template<class _Alloctor = null_stralloctor, typename size_type = uint32_t>
+	class string_ // basic_string
+	{
+	public:
+		using pointer = char*;
+		using const_pointer = char*;
+		using iterator = char*;
+		using const_iterator = const char *;
+		using reference = char&;
+		using const_reference = const char&;
+
+		struct t_h {
+			size_type sizebuf; // not include head
+			size_type sizedata;// not include null
+		};
+	private:
+		char* _pstr;
+	private:
+		char* smalloc(size_t strsize)
+		{
+			if (strsize > max_size())
+				return nullptr;
+			char *pstr = nullptr;
+			ec::memory *pmem = _Alloctor()();
+			size_t zr = strsize + sizeof(t_h) + 1;
+			if (pmem)
+				pstr = (char*)pmem->malloc(zr, zr, zr + zr / 2u < max_size());
+			else {
+				if (zr % 16u)
+					zr += 16u - zr % 16u;
+				if (zr + zr / 2u < max_size())
+					zr += zr / 2u;
+				if (zr < 64u)
+					zr = 64u;
+				pstr = (char*)::malloc(zr);
+			}
+			if (pstr) {
+				t_h* ph = (t_h*)pstr;
+				ph->sizebuf = (uint32_t)zr - sizeof(t_h);
+				ph->sizedata = 0;
+				pstr += 8;
+			}
+			return pstr;
+		}
+
+		void sfree(pointer &str)
+		{
+			if (str) {
+				ec::memory *pmem = _Alloctor()();
+				if (pmem)
+					pmem->mem_free(str - sizeof(t_h));
+				else
+					::free(str - sizeof(t_h));
+				str = nullptr;
+			}
+		}
+
+		bool recapacity(size_t strsize)
+		{
+			if (!strsize) {
+				sfree(_pstr);
+				return true;
+			}
+			if (strsize <= capacity())
+				return true;
+			if (!_pstr) {
+				_pstr = smalloc(strsize);
+				return nullptr != _pstr;
+			}
+			size_t zd = ssize(_pstr);
+			char* pnewstr = smalloc(strsize);
+			if (!pnewstr)
+				return false;
+			memcpy(pnewstr, _pstr, zd);
+			setsize_(pnewstr, zd);
+			sfree(_pstr);
+			_pstr = pnewstr;
+			return true;
+		}
+
+		void setsize_(char* pstr, size_t zlen)
+		{
+			if (!pstr)
+				return;
+			t_h* ph = (t_h*)(pstr - sizeof(t_h));
+			ph->sizedata = (uint32_t)zlen;
+		}
+
+		size_t ssize(const char* pstr) const
+		{
+			if (!pstr)
+				return 0;
+			const t_h* ph = (const t_h*)(pstr - sizeof(t_h));
+			return ph->sizedata;
+		}
+
+		size_t scapacity(const char* pstr) const
+		{
+			if (!pstr)
+				return 0;
+			const t_h* ph = (const t_h*)(pstr - sizeof(t_h));
+			return ph->sizebuf - 1;
+		}
+	public:
+		string_() : _pstr(nullptr) {
+		}
+
+		string_(const char* s) : _pstr(nullptr)
+		{
+			if (!s || !*s)
+				return;
+			append(s, strlen(s));
+		}
+
+		string_(const char* s, size_t size) : _pstr(nullptr)
+		{
+			append(s, size);
+		}
+
+		string_(const string_& str) : _pstr(nullptr)
+		{
+			append(str.data(), str.size());
+		}
+
+		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
+		string_(const _Str& str) : _pstr(nullptr)
+		{
+			append(str.data(), str.size());
+		}
+
+		~string_() {
+			sfree(_pstr);
+		}
+
+		string_(string_<_Alloctor, size_type>&& str) // move construct
+		{
+			_pstr = str._pstr;
+			str._pstr = nullptr;
+		}
+
+		string_& operator= (string_<_Alloctor, size_type>&& v) // for move
+		{
+			sfree(_pstr);
+			_pstr = v._pstr;
+			v._pstr = nullptr;
+			return *this;
+		}
+
+		operator pointer()
+		{
+			if (!_pstr)
+				return (char*)"";// never return nullptr
+			_pstr[size()] = 0;
+			return _pstr;
+		}
+
+		void swap(string_<_Alloctor, size_type>& str) //simulate move
+		{
+			char *stmp = _pstr;
+			_pstr = str._pstr;
+			str._pstr = stmp;
+		}
+
+		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
+		string_& operator= (const _Str &str)
+		{
+			clear();
+			return append(str.data(), str.size());
+		}
+
+		inline string_& operator= (const string_& str)
+		{
+			clear();
+			return append(str.data(), str.size());
+		}
+
+		inline string_& operator= (const char* s)
+		{
+			clear();
+			return append(s);
+		}
+
+		string_& operator= (char c)
+		{
+			clear();
+			if (recapacity(1)) {
+				_pstr[0] = c;
+				setsize_(_pstr, 1);
+			}
+			return *this;
+		}
+
+		inline ec::memory* get_allocator() const noexcept
+		{
+			return _Alloctor()();
+		}
+	public: //Iterators
+
+		inline iterator begin() noexcept
+		{
+			return _pstr;
+		}
+
+		inline const_iterator begin() const noexcept
+		{
+			return _pstr;
+		}
+
+		inline iterator end() noexcept
+		{
+			return _pstr ? _pstr + size() : nullptr;
+		}
+
+		inline const_iterator end() const noexcept
+		{
+			return _pstr ? _pstr + size() : nullptr;
+		}
+
+		inline const_iterator cbegin() const noexcept
+		{
+			return _pstr;
+		}
+
+		inline const_iterator cend() const noexcept
+		{
+			return _pstr ? _pstr + size() : nullptr;
+		}
+
+	public: // Capacity
+
+		static inline size_t max_size()
+		{
+			return static_cast<size_type>(-1) - 32u;
+		}
+
+		inline size_t size() const noexcept
+		{
+			return ssize(_pstr);
+		}
+
+		inline size_t length() const noexcept
+		{
+			return ssize(_pstr);
+		}
+
+		inline size_t capacity() const noexcept
+		{
+			return scapacity(_pstr);
+		}
+
+		inline void reserve(size_t n = 0) noexcept
+		{
+			recapacity(n);
+		}
+
+		inline void clear() noexcept
+		{
+			setsize_(_pstr, 0);
+		}
+
+		inline bool empty() const noexcept
+		{
+			return !size();
+		}
+
+	public: //Element access
+		inline reference operator[] (size_t pos) noexcept
+		{
+			return _pstr[pos];
+		}
+		inline const_reference operator[] (size_t pos) const noexcept
+		{
+			return _pstr[pos];
+		}
+
+	public: // String operations:
+		const char *data() const noexcept
+		{
+			return _pstr;
+		}
+		const char* c_str() const noexcept
+		{
+			if (!_pstr)
+				return "";// never return nullptr
+			_pstr[size()] = 0;
+			return _pstr;
+		}
+
+	public: //Modifiers
+		string_& append(const char* s, size_t n) noexcept
+		{
+			if (!s || !*s || !n)
+				return *this;
+			size_t zs = size();
+			if (recapacity(zs + n)) {
+				memcpy(_pstr + zs, s, n);
+				setsize_(_pstr, zs + n);
+			}
+			return *this;
+		}
+
+		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
+		inline string_& append(const _Str& str) noexcept
+		{
+			return append(str.data(), str.size());
+		}
+
+		string_& append(const char* s) noexcept
+		{
+			if (!s || !*s)
+				return *this;
+			return append(s, strlen(s));
+		}
+
+		string_& append(char c) noexcept
+		{
+			size_t zs = size();
+			if (recapacity(zs + 1)) {
+				_pstr[zs] = c;
+				setsize_(_pstr, zs + 1);
+			}
+			return *this;
+		}
+
+		string_& assign(string_<_Alloctor, size_type>&& v) noexcept
+		{
+			sfree(_pstr);
+			_pstr = v._pstr;
+			v._pstr = nullptr;
+			return *this;
+		}
+
+		inline string_& assign(const char* s, size_t n) noexcept
+		{
+			clear();
+			return append(s, n);
+		}
+
+		string_& assign(const char* s) noexcept
+		{
+			clear();
+			if (!s || !*s)
+				return *this;
+			return append(s, strlen(s));
+		}
+		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
+		inline string_& assign(const _Str& str)
+		{
+			clear();
+			return append(str.data(), str.size());
+		}
+
+		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
+		inline string_& operator+= (const _Str& str)
+		{
+			return append(str.data(), str.size());
+		}
+
+		inline string_& operator+= (const char* s) noexcept
+		{
+			return append(s);
+		}
+
+		inline string_& operator+= (char c) noexcept
+		{
+			return append(c);
+		}
+
+		inline void push_back(char c) noexcept
+		{
+			append(c);
+		}
+
+		void pop_back() noexcept
+		{
+			size_t zlen = size();
+			if (zlen > 0)
+				setsize_(_pstr, zlen - 1);
+		}
+
+		void resize(size_t n, char c = 0) noexcept
+		{
+			size_t zlen = size();
+			if (zlen > n)
+				setsize_(_pstr, n);
+			else if (n < zlen) {
+				if (recapacity(n)) {
+					memset(_pstr + zlen, c, n - zlen);
+					setsize_(_pstr, n);
+				}
+			}
+		}
+
+		string_& insert(size_t pos, const char* s, size_t n) noexcept
+		{
+			if (!s || !*s || !n)
+				return *this;
+			size_t zlen = size();
+			if (pos >= zlen)
+				return append(s, n);
+			if (zlen + n > capacity()) {
+				char* pnewstr = smalloc(zlen + n);
+				if (!pnewstr)
+					return *this;
+				if (pos)
+					memcpy(pnewstr, _pstr, pos);
+				memcpy(pnewstr + pos, s, n);
+				memcpy(pnewstr + pos + n, _pstr + pos, zlen - pos);
+				setsize_(pnewstr, zlen + n);
+				sfree(_pstr);
+				_pstr = pnewstr;
+				return *this;
+			}
+			memmove(_pstr + pos + n, _pstr + pos, zlen - pos);
+			memcpy(_pstr + pos, s, n);
+			setsize_(_pstr, zlen + n);
+			return *this;
+		}
+
+		string_& insert(size_t pos, const char* s) noexcept
+		{
+			if (!s || !*s)
+				return *this;
+			return insert(pos, s, strlen(s));
+		}
+
+		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
+		inline string_& insert(size_t pos, const _Str& str) noexcept
+		{
+			return insert(pos, str.data(), str.size());
+		}
+
+		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
+		string_& insert(size_t pos, const _Str& str,
+			size_t subpos, size_t sublen) noexcept
+		{
+			if (subpos >= str.size() || !sublen)
+				return *this;
+			if (sublen > str.size())
+				sublen = str.size();
+			if (subpos + sublen > str.size())
+				sublen = str.size() - subpos;
+			return insert(pos, str.data() + subpos, sublen);
+		}
+
+		string_& erase(size_t pos = 0, size_t len = (size_t)(-1)) noexcept
+		{
+			if (!pos && len == (size_t)(-1)) {
+				clear();
+				return *this;
+			}
+			size_t datasize = size();
+			if (!len || empty() || pos >= datasize)
+				return *this;
+			if (len == (size_t)(-1) || pos + len >= datasize) {
+				setsize_(_pstr, pos);
+				return *this;
+			}
+			memmove(_pstr + pos, _pstr + pos + len, datasize - pos - len);
+			setsize_(_pstr, datasize - len);
+			return *this;
+		}
+
+		string_& replace(size_t pos, size_t len, const char* s, size_t n) noexcept
+		{
+			if (!s || !*s || !n)
+				return erase(pos, len);
+			if (!len)
+				return insert(pos, s, n);
+			erase(pos, len);
+			return insert(pos, s, n);
+		}
+
+		string_& replace(size_t pos, size_t len, const char* s) noexcept
+		{
+			if (!s || !*s)
+				return erase(pos, len);
+			return replace(pos, len, s, strlen(s));
+		}
+
+		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
+		inline string_& replace(size_t pos, size_t len, const _Str& str) noexcept
+		{
+			return replace(pos, len, str.data(), str.size());
+		}
+
+		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
+		inline int compare(const _Str& str) const  noexcept
+		{
+			return ::strcmp(c_str(), str.c_str());
+		}
+
+		int compare(const char* s) const  noexcept
+		{
+			if (!s)
+				return false;
+			return ::strcmp(c_str(), s);
+		}
+
+#ifdef _WIN32
+		bool printf(const char * format, ...)
+#else
+		bool printf(const char * format, ...) __attribute__((format(printf, 2, 3)))
+#endif
+		{
+			int n = 0;
+			clear();
+			if (!recapacity(EC_STR_MED_SIZE - sizeof(t_h) - 1))
+				return false;
+			else {
+				va_list arg_ptr;
+				va_start(arg_ptr, format);
+				n = vsnprintf(_pstr, capacity(), format, arg_ptr);
+				va_end(arg_ptr);
+			}
+			if (n < 0)
+				return false;
+			if (n <= (int)capacity()) {
+				setsize_(_pstr, n);
+				return true;
+			}
+
+			if (!recapacity(n))
+				return false;
+			else {
+				va_list arg_ptr;
+				va_start(arg_ptr, format);
+				n = vsnprintf(_pstr, capacity(), format, arg_ptr);
+				va_end(arg_ptr);
+			}
+			if (n >= 0 && n <= (int)capacity()) {
+				setsize_(_pstr, n);
+				return true;
+			}
+			return false;
+		}
+	}; // string_
+
+#if (0 != USE_EC_STRING)
+	using string = string_<ec_string_alloctor>;
+#endif
 
 	template<typename charT
 		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
@@ -371,10 +933,10 @@ namespace ec
 			if (*ptr >= 'a' && *ptr <= 'z')
 				*ptr -= 'a' - 'A';
 			ptr++;
-		}
+	}
 		return str;
 #endif
-	}
+}
 
 	template<typename charT
 		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
@@ -388,7 +950,7 @@ namespace ec
 			if (*ptr >= 'A' && *ptr <= 'Z')
 				*ptr += 'a' - 'A';
 			ptr++;
-		}
+	}
 		return str;
 #endif
 	}
@@ -397,6 +959,8 @@ namespace ec
 		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
 		bool strisutf8(const charT* s, size_t size = 0)
 	{ //return true if s is utf8 string
+		if (!s)
+			return true;
 		uint8_t c;
 		int nb = 0;
 		const char* pend = s + (size ? size : strlen(s));
@@ -700,7 +1264,7 @@ namespace ec
 	*/
 	template<typename charT
 		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		char* bin2view(const void* pm, size_t size, charT *so, size_t sizeout)
+		const char* bin2view(const void* pm, size_t size, charT *so, size_t sizeout)
 	{
 		if (!so)
 			return nullptr;

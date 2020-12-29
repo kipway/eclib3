@@ -2,7 +2,7 @@
 \file ec_netsrv_ws.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.15
+\update 2020.12.26
 
 net server http/ws session class
 
@@ -47,7 +47,7 @@ namespace ec
 			uint32_t _ucid;
 			int _nws; // 0: http ; 1:ws
 			int _wscompress; // ws_x_webkit_deflate_frame or ws_permessage_deflate
-			string _txt;   // tmp
+			vector<char> _txt;   // tmp
 			bytes _wsmsg; // ws frame
 			int _comp;// compress flag
 			int _opcode;  // operate code
@@ -128,7 +128,7 @@ namespace ec
 						ws_send(http_sret400, strlen(http_sret400));
 						return pPkg->HasKeepAlive();
 					}
-					string vret(_pwsmem);
+					vector<char> vret(_pwsmem);
 
 					vret.reserve(1024 * 4);
 					const char*sc = "HTTP/1.1 101 Switching Protocols\x0d\x0a"\
@@ -141,9 +141,9 @@ namespace ec
 					encode_sha1(tmp, (unsigned int)strlen(tmp), sha1out); //SHA1
 					encode_base64(base64out, sha1out, 20);    //BASE64
 
-					vret.append("Sec-WebSocket-Accept: ").append(base64out).append("\x0d\x0a");
+					vret.append("Sec-WebSocket-Accept: ").append((const char*)base64out).append("\x0d\x0a");
 					if (sProtocol[0]) {
-						vret.append("Sec-WebSocket-Protocol: ").append(sProtocol).append("\x0d\x0a");
+						vret.append("Sec-WebSocket-Protocol: ").append((const char*)sProtocol).append("\x0d\x0a");
 					}
 					if (pPkg->GetHeadFiled("Host", tmp, sizeof(tmp))) {
 						vret.append("Host: ").append(tmp, strlen(tmp)).append("\x0d\x0a");
@@ -268,7 +268,7 @@ namespace ec
 					_wsmsg.append(stxt + datapos, datalen);
 				else {
 					if (_wscompress == ws_x_webkit_deflate_frame) { //deflate_frame
-						string debuf(_pwsmem);
+						vector<char> debuf(_pwsmem);
 						debuf.reserve(EC_SIZE_WS_FRAME);
 						debuf.push_back('\x78');
 						debuf.push_back('\x9c');

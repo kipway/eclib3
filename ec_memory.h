@@ -2,7 +2,7 @@
 \file ec_memory.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.10.25
+\update 2020.12.27
 
 memory
 	fast memory allocator class for vector,hashmap etc.
@@ -82,10 +82,10 @@ namespace ec {
 			return _free(pmem);
 		}
 
-		void *malloc(size_t size, size_t &outsize)
+		void *malloc(size_t size, size_t &outsize, bool bext = false)
 		{
 			unique_spinlock lck(_pmutex);
-			return _malloc(size, outsize);
+			return _malloc(size, outsize, bext);
 		}
 
 		void* mem_calloc(size_t count, size_t size)
@@ -152,7 +152,7 @@ namespace ec {
 			return ph != nullptr;
 		}
 
-		void *_malloc(size_t size, size_t &outsize)
+		void *_malloc(size_t size, size_t &outsize, bool bext = false)
 		{
 			void* pr = nullptr;
 			if (size <= _sz_s) {
@@ -188,6 +188,11 @@ namespace ec {
 					outsize = _sz_l;
 					return pr;
 				}
+			}
+			if (bext) {
+				if (size % 16)
+					size += 16 - size % 16;
+				size += size / 2;
 			}
 			outsize = size;
 			pr = ::malloc(size);
