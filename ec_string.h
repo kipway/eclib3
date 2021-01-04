@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.26
+\update 2021.1.3
 
 string , bytes and string functions
 
@@ -127,9 +127,9 @@ namespace ec
 			}
 			if (pstr) {
 				t_h* ph = (t_h*)pstr;
-				ph->sizebuf = (uint32_t)zr - sizeof(t_h);
+				ph->sizebuf = (size_type)(zr - sizeof(t_h));
 				ph->sizedata = 0;
-				pstr += 8;
+				pstr += sizeof(t_h);
 			}
 			return pstr;
 		}
@@ -174,7 +174,7 @@ namespace ec
 			if (!pstr)
 				return;
 			t_h* ph = (t_h*)(pstr - sizeof(t_h));
-			ph->sizedata = (uint32_t)zlen;
+			ph->sizedata = (size_type)zlen;
 		}
 
 		size_t ssize(const char* pstr) const
@@ -588,6 +588,12 @@ namespace ec
 			return ::strcmp(c_str(), s);
 		}
 
+		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
+		bool operator== (const _Str& str)
+		{
+			return (size() == str.size() && size() && !memcmp(_pstr, str.data(), str.size()));
+		}
+
 #ifdef _WIN32
 		bool printf(const char * format, ...)
 #else
@@ -933,10 +939,10 @@ namespace ec
 			if (*ptr >= 'a' && *ptr <= 'z')
 				*ptr -= 'a' - 'A';
 			ptr++;
-	}
+		}
 		return str;
 #endif
-}
+	}
 
 	template<typename charT
 		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
@@ -950,7 +956,7 @@ namespace ec
 			if (*ptr >= 'A' && *ptr <= 'Z')
 				*ptr += 'a' - 'A';
 			ptr++;
-	}
+		}
 		return str;
 #endif
 	}
