@@ -2,7 +2,7 @@
 \file ec_tls12.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.19
+\update 2021.1.11
 
 TLS1.2(rfc5246)  session class
 
@@ -267,23 +267,19 @@ namespace ec
 				memset(_key_block, 0, sizeof(_key_block));
 			}
 		private:
-			bool caldatahmac(uint8_t type, uint64_t seqno, const void* pd, size_t len, uint8_t* pkeymac, uint8_t *outmac)
-			{ //Calculate the hashmac value of the TLS record
-				tlsrec es;
-				try {
-					es < seqno < type < (char)TLSVER_MAJOR < (char)TLSVER_NINOR < (unsigned short)len;
-					es.write(pd, len);
-				}
-				catch (...) {
-					return false;
-				}
+			//Calculate the hashmac value of the TLS record, speed optimized version,Reserve 13 bytes in front of pout
+			bool caldatahmac(uint8_t type, uint64_t seqno, void* pd, size_t len, uint8_t* pkeymac, uint8_t *outmac)
+			{
+				uint8_t *ps = ((uint8_t*)pd) - 13;
+				ec::stream es(ps, len + 13);
+				es < seqno < type < (char)TLSVER_MAJOR < (char)TLSVER_NINOR < (unsigned short)len;
 				unsigned int mdlen = 0;
 				if (_cipher_suite == TLS_RSA_WITH_AES_128_CBC_SHA || _cipher_suite == TLS_RSA_WITH_AES_256_CBC_SHA)
-					return HMAC(EVP_sha1(), pkeymac, 20, es.data(), es.size(), outmac, &mdlen) != NULL;
-				return HMAC(EVP_sha256(), pkeymac, 32, es.data(), es.size(), outmac, &mdlen) != NULL;
+					return HMAC(EVP_sha1(), pkeymac, 20, ps, len + 13, outmac, &mdlen) != NULL;
+				return HMAC(EVP_sha256(), pkeymac, 32, ps, len + 13, outmac, &mdlen) != NULL;
 			}
 
-			bool decrypt_record(const uint8_t*pd, size_t len, uint8_t* pout, int *poutsize)
+			bool decrypt_record(const uint8_t*pd, size_t len, uint8_t* pout, int *poutsize)// Reserve 8 bytes in front of pout
 			{
 				size_t maclen = 32;
 				if (_cipher_suite == TLS_RSA_WITH_AES_128_CBC_SHA || _cipher_suite == TLS_RSA_WITH_AES_256_CBC_SHA)
@@ -291,8 +287,7 @@ namespace ec
 				if (len < 53) // 5 + pading16(IV + maclen + datasize)
 					return false;
 
-				int i;
-				unsigned char sout[1024 * 20], iv[AES_BLOCK_SIZE], *pkey = _key_sw, *pkmac = _key_swmac;
+				unsigned char *sout = pout + 5, iv[AES_BLOCK_SIZE], *pkey = _key_sw, *pkmac = _key_swmac;
 				AES_KEY aes_d;
 				int nkeybit = 128;
 				if (_cipher_suite == TLS_RSA_WITH_AES_256_CBC_SHA256 || _cipher_suite == TLS_RSA_WITH_AES_256_CBC_SHA)
@@ -319,13 +314,10 @@ namespace ec
 				memcpy(macsrv, &sout[datasize], maclen);
 				if (!caldatahmac(pd[0], _seqno_read, sout, datasize, pkmac, mac))
 					return false;
-				for (i = 0; i < (int)maclen; i++) {
-					if (mac[i] != macsrv[i])
-						return false;
-				}
+				if (memcmp(mac, macsrv, maclen))
+					return false;
 
-				memcpy(pout, pd, 5);
-				memcpy(pout + 5, sout, datasize);
+				*((uint32_t*)pout) = *((uint32_t*)pd);
 				*(pout + 3) = ((datasize >> 8) & 0xFF);
 				*(pout + 4) = (datasize & 0xFF);
 				*poutsize = (int)datasize + 5;
@@ -337,58 +329,46 @@ namespace ec
 			int MKR_WithAES_BLK(_Out *pout, uint8_t rectype, const uint8_t* sblk, size_t size)
 			{
 				int i;
-				uint8_t* pkeyw = _key_cw, *pkeywmac = _key_cwmac;
+				uint8_t* pkeyw = _bserver ? _key_sw : _key_cw, *pkeywmac = _bserver ? _key_swmac : _key_cwmac;
 				uint8_t IV[AES_BLOCK_SIZE];//rand IV
-
-				tlsrec ss, es;
-				uint8_t tmpe[TLS_REC_BUF_SIZE];
-
 				uint8_t mac[32];
-				if (_bserver) {
-					pkeyw = _key_sw;
-					pkeywmac = _key_swmac;
-				}
+				tlsrec ss, es;
 
-				try {
-					RAND_bytes(IV, AES_BLOCK_SIZE);
-					ss << rectype << (uint8_t)TLSVER_MAJOR << (uint8_t)TLSVER_NINOR << (uint16_t)0;
-					ss.write(IV, AES_BLOCK_SIZE);
-				}
-				catch (...) {
-					return -1;
-				}
-				if (!caldatahmac(rectype, _seqno_send, sblk, size, pkeywmac, mac))
-					return -1;
-
-				size_t maclen = 32;
+				// calculate HMAC
+				es < _seqno_send < rectype < (char)TLSVER_MAJOR < (char)TLSVER_NINOR < (unsigned short)size;
+				es.write(sblk, size); //content
+				unsigned int mdlen = 0;
+				unsigned char *hmacret = nullptr;
 				if (_cipher_suite == TLS_RSA_WITH_AES_128_CBC_SHA || _cipher_suite == TLS_RSA_WITH_AES_256_CBC_SHA)
-					maclen = 20;
-
-				try {
-					es.write(sblk, size); //content
-					es.write(mac, maclen); //MAC
-					size_t len = es.getpos() + 1;
-					if (len % AES_BLOCK_SIZE) {
-						for (i = 0; i < (int)(AES_BLOCK_SIZE - (len % AES_BLOCK_SIZE)) + 1; i++)//padding and   padding_length
-							es << (char)(AES_BLOCK_SIZE - (len % AES_BLOCK_SIZE));
-					}
-					else
-						es << (char)0; //padding_length
-
-					AES_KEY aes_e;
-					int nkeybit = 128;
-					if (_cipher_suite == TLS_RSA_WITH_AES_256_CBC_SHA256 || _cipher_suite == TLS_RSA_WITH_AES_256_CBC_SHA)
-						nkeybit = 256;
-					if (AES_set_encrypt_key(pkeyw, nkeybit, &aes_e) < 0)
-						return -1;
-
-					AES_cbc_encrypt(es.data(), tmpe, es.size(), &aes_e, IV, AES_ENCRYPT);
-					ss.write(tmpe, es.size());
-					ss.setpos(3) < (uint16_t)(es.size() + sizeof(IV));
-				}
-				catch (int) {
+					hmacret = HMAC(EVP_sha1(), pkeywmac, 20, es.data(), es.size(), mac, &mdlen);
+				else
+					hmacret = HMAC(EVP_sha256(), pkeywmac, 32, es.data(), es.size(), mac, &mdlen);
+				if (!hmacret)
 					return -1;
+
+				// encrypt
+				es.write(mac, (_cipher_suite == TLS_RSA_WITH_AES_128_CBC_SHA || _cipher_suite == TLS_RSA_WITH_AES_256_CBC_SHA) ? 20 : 32); //MAC
+				size_t len = es.getpos() + 1 - 13;
+				if (len % AES_BLOCK_SIZE) {
+					for (i = 0; i < (int)(AES_BLOCK_SIZE - (len % AES_BLOCK_SIZE)) + 1; i++)//padding and padding_length
+						es << (char)(AES_BLOCK_SIZE - (len % AES_BLOCK_SIZE));
 				}
+				else
+					es << (char)0; //padding_length
+
+				AES_KEY aes_e;
+				if (AES_set_encrypt_key(pkeyw,
+					(_cipher_suite == TLS_RSA_WITH_AES_256_CBC_SHA256 || _cipher_suite == TLS_RSA_WITH_AES_256_CBC_SHA) ? 256 : 128, &aes_e) < 0)
+					return -1;
+
+				RAND_bytes(IV, AES_BLOCK_SIZE);
+				ss << rectype << (uint8_t)TLSVER_MAJOR << (uint8_t)TLSVER_NINOR << (uint16_t)0;
+				ss.write(IV, AES_BLOCK_SIZE);
+				AES_cbc_encrypt(es.data() + 13, ss.data() + ss.size(), es.size() - 13, &aes_e, IV, AES_ENCRYPT);
+				ss.setsize(ss.size() + es.size() - 13);
+				ss.setpos(3) < (uint16_t)(es.size() + sizeof(IV) - 13);
+
+				// output
 				pout->append(ss.data(), ss.size());
 				_seqno_send++;
 				return (int)ss.size();
@@ -668,8 +648,8 @@ namespace ec
 					if (ulen + 5 > nl)
 						break;
 					if (_breadcipher) {
-						if (decrypt_record(p, ulen + 5, tmp, &ndl)) {
-							nret = dorecord(tmp, ndl, pout);
+						if (decrypt_record(p, ulen + 5, &tmp[8], &ndl)) {
+							nret = dorecord(&tmp[8], ndl, pout);
 							if (nret == TLS_SESSION_ERR)
 								return nret;
 						}
