@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.1.3
+\update 2021.1.12
 
 string , bytes and string functions
 
@@ -37,27 +37,40 @@ namespace std
 #define EC_STR_SML_SIZE 80
 #endif
 #ifndef EC_STR_SML_NUMS
-#define EC_STR_SML_NUMS (1024 * 128) //8M
+#define EC_STR_SML_NUMS (1024 * 48)
 #endif
 
 #ifndef EC_STR_MED_SIZE
 #define EC_STR_MED_SIZE 256
 #endif
 #ifndef EC_STR_MED_NUMS
-#define EC_STR_MED_NUMS (1024 * 32)  //8M
+#define EC_STR_MED_NUMS (1024 * 16)
+#endif
+
+#ifndef EC_STR_MED2_SIZE
+#define EC_STR_MED2_SIZE 512
+#endif
+#ifndef EC_STR_MED2_NUMS
+#define EC_STR_MED2_NUMS (1024 * 8)
 #endif
 
 #ifndef EC_STR_LRG_SIZE
 #define EC_STR_LRG_SIZE 1024
 #endif
 #ifndef EC_STR_LRG_NUMS
-#define EC_STR_LRG_NUMS (1024 * 8)   //8M
+#define EC_STR_LRG_NUMS (1024 * 4)
 #endif
 
 #if (0 != USE_EC_STRING)
-#define DEFINE_EC_STRING_ALLOCTOR 	ec::spinlock ec_stringspinlock;\
-	ec::memory ec_stringallocator(EC_STR_SML_SIZE, EC_STR_SML_NUMS, EC_STR_MED_SIZE, EC_STR_MED_NUMS, EC_STR_LRG_SIZE, EC_STR_LRG_NUMS, &ec_stringspinlock);\
+#define DEFINE_EC_STRING_ALLOCTOR ec::spinlock ec_stringspinlock;\
+	ec::memory ec_stringallocator(\
+	EC_STR_SML_SIZE, EC_STR_SML_NUMS,\
+	EC_STR_MED_SIZE, EC_STR_MED_NUMS,\
+	EC_STR_MED2_SIZE, EC_STR_MED2_NUMS,\
+	EC_STR_LRG_SIZE, EC_STR_LRG_NUMS,\
+	&ec_stringspinlock);\
 	ec::memory* p_ec_string_allocator = &ec_stringallocator;
+
 
 extern ec::memory* p_ec_string_allocator;
 struct ec_string_alloctor {

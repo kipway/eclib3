@@ -2,7 +2,7 @@
 \file ec_memory.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.27
+\update 2021.1.12
 
 memory
 	fast memory allocator class for vector,hashmap etc.
@@ -13,7 +13,7 @@ autobuf
 mem_sets
 	fast memory allocator
 
-eclib 3.0 Copyright (c) 2017-2018, kipway
+eclib 3.0 Copyright (c) 2017-2021, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,245 +21,326 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 */
 
 #pragma once
+#include <assert.h>
 #include <cstdint>
 #include <memory.h>
 #include <vector>
 #include "ec_mutex.h"
 
+#ifndef EC_MEM_UPLEVEL
+#define EC_MEM_UPLEVEL  2
+#endif
+#define EC_MEM_MAX_STKS 16
 #define EC_MEM_ALIGN_SIZE (sizeof(size_t) * 2)
 namespace ec {
 	class memory
 	{
 	public:
+		class stk
+		{
+		public:
+			stk(size_t blksize, size_t blknum) : _blksize(blksize), _pos(0)
+			{
+				if (blksize % EC_MEM_ALIGN_SIZE)
+					blksize += EC_MEM_ALIGN_SIZE - blksize % EC_MEM_ALIGN_SIZE;
+				_pbuf = (unsigned char*)::malloc(blksize * blknum);
+				if (!_pbuf)
+					return;
+				_pstk = (void**)::malloc(blknum * sizeof(void*));
+				if (_pstk)
+					_blknum = blknum;
+				else {
+					_blknum = 0;
+					::free(_pbuf);
+					_pbuf = nullptr;
+					return;
+				}
+				for (auto i = _blknum; i > 0; i--)
+					_pstk[_pos++] = _pbuf + (i - 1)* blksize;
+			}
+			~stk()
+			{
+				if (_pstk) {
+					::free(_pstk);
+					_pstk = nullptr;
+				}
+				if (_pbuf) {
+					::free(_pbuf);
+					_pbuf = nullptr;
+				}
+				_pos = 0;
+				_blknum = 0;
+			}
+			void* pop()
+			{
+				if (_pstk && _pos) {
+					--_pos;
+					return _pstk[_pos];
+				}
+				return nullptr;
+			}
+			inline size_t blksize() const
+			{
+				return _blksize;
+			}
+			inline bool empty() const
+			{
+				return !_pos;
+			}
+			bool free(void* p)
+			{
+				if (_pbuf && reinterpret_cast<size_t>(p) >= (size_t)_pbuf
+					&& reinterpret_cast<size_t>(p) < (size_t)_pbuf + _blksize * _blknum) {
+					assert(_pos < _blknum);
+					_pstk[_pos++] = p;
+					return true;
+				}
+				return false;
+			}
+
+			inline bool in(void *p) const
+			{
+				return (_pbuf && reinterpret_cast<size_t>(p) >= (size_t)_pbuf
+					&& reinterpret_cast<size_t>(p) < (size_t)_pbuf + _blksize * _blknum);
+			}
+		private:
+			size_t _blksize, _blknum, _pos;
+			void ** _pstk;
+			unsigned char* _pbuf;
+		}; // class stk
+
+	public:
 		memory(const memory&) = delete;
 		memory& operator = (const memory&) = delete;
-
+		memory(spinlock* plock = nullptr) :_plock(plock), _numstk(0)
+		{
+		}
 		memory(size_t sblksize, size_t sblknum,
 			size_t mblksize = 0, size_t mblknum = 0,
 			size_t lblksize = 0, size_t lblknum = 0,
-			spinlock* pmutex = nullptr
-		) : _ps(nullptr), _pm(nullptr), _pl(nullptr), _pmutex(pmutex)
-			, _blk_s(sblknum), _blk_m(mblknum), _blk_l(lblknum)
-			, _nsys_malloc(0)
+			spinlock* plock = nullptr
+		) :memory(plock)
 		{
-			_sz_s = sblksize;// small memory blocks,Pre-allocation
-			if (_sz_s % EC_MEM_ALIGN_SIZE)
-				_sz_s += EC_MEM_ALIGN_SIZE - sblksize % EC_MEM_ALIGN_SIZE;
-			malloc_block(_sz_s, _blk_s, _ps, _stks);
-
-			_sz_m = mblksize; // medium memory blocks, malloc at the time of use
-			if (_sz_m % EC_MEM_ALIGN_SIZE)
-				_sz_m += EC_MEM_ALIGN_SIZE - mblksize % EC_MEM_ALIGN_SIZE;
-
-			_sz_l = lblksize; // large memory blocks, malloc at the time of use
-			if (_sz_l % EC_MEM_ALIGN_SIZE)
-				_sz_l += EC_MEM_ALIGN_SIZE - lblksize % EC_MEM_ALIGN_SIZE;
+			add_blk(sblksize, sblknum);
+			add_blk(mblksize, mblknum);
+			add_blk(lblksize, lblknum);
+		}
+		memory(size_t sblksize, size_t sblknum,
+			size_t mblksize, size_t mblknum,
+			size_t m2blksize, size_t m2blknum,
+			size_t lblksize, size_t lblknum,
+			spinlock* plock = nullptr
+		) :memory(plock)
+		{
+			add_blk(sblksize, sblknum);
+			add_blk(mblksize, mblknum);
+			add_blk(m2blksize, m2blknum);
+			add_blk(lblksize, lblknum);
 		}
 		~memory()
 		{
-			_stks.clear();
-			_stkm.clear();
-			_stkl.clear();
-			if (_ps)
-				::free(_ps);
-			_ps = nullptr;
-			if (_pm)
-				::free(_pm);
-			_pm = nullptr;
-			if (_pl)
-				::free(_pl);
-			_pl = nullptr;
+			for (auto i = 0u; i < _numstk; i++) {
+				delete _stks[i];
+				_stks[i] = nullptr;
+			}
+			_numstk = 0;
 		}
-		void *mem_malloc(size_t size)
+		void add_blk(size_t blksize, size_t blknum)
 		{
-			unique_spinlock lck(_pmutex);
-			size_t sizeout = 0;
-			return _malloc(size, sizeout);
+			if (!blksize || !blknum)
+				return;
+			unique_spinlock lck(_plock);
+			if (EC_MEM_MAX_STKS == _numstk)
+				return;
+			stk* p = new stk(blksize, blknum);
+			if (!p)
+				return;
+			if (p->empty()) {
+				delete p;
+				return;
+			}
+			_stks[_numstk++] = p;
+			if (_numstk < 2)
+				return;
+			qsort(_stks, _numstk, sizeof(stk*), compare);			
 		}
-		void mem_free(void *pmem)
+		/*
+		bool add_blk(size_t blksize, size_t blknum)
 		{
-			unique_spinlock lck(_pmutex);
-			return _free(pmem);
-		}
-
+			if (!blksize || !blknum)
+				return true;
+			unique_spinlock lck(_plock);
+			if (EC_MEM_MAX_STKS == _numstk)
+				return false;
+			stk* p = new stk(blksize, blknum);
+			if (!p)
+				return false;
+			if (p->empty()) {
+				delete p;
+				return false;
+			}
+			_stks[_numstk++] = p;
+			if (_numstk < 2)
+				return true;
+			qsort(_stks, _numstk, sizeof(stk*), compare);
+			return true;
+		}*/
 		void *malloc(size_t size, size_t &outsize, bool bext = false)
 		{
-			unique_spinlock lck(_pmutex);
-			return _malloc(size, outsize, bext);
-		}
-
-		void* mem_calloc(size_t count, size_t size)
-		{
-			void* p = mem_malloc(count * size);
-			if (p)
-				memset(p, 0, count * size);
-			return p;
-		}
-
-		void *mem_realloc(void *ptr, size_t size)
-		{
-			unique_spinlock lck(_pmutex);
-			return _realloc(ptr, size);
-		}
-
-		struct t_mem_info {
-			int sysblks;// system blocks
-			int sz_s, sz_m, sz_l;    // blocks size
-			int blk_s, blk_m, blk_l; // blocks number
-			int stk_s, stk_m, stk_l; // not use in stacks
-		};
-
-		void getinfo(t_mem_info *pinfo)
-		{
-			pinfo->sysblks = _nsys_malloc;
-			pinfo->sz_s = (int)_sz_s;
-			pinfo->sz_m = (int)_sz_m;
-			pinfo->sz_l = (int)_sz_l;
-			pinfo->blk_s = (int)_blk_s;
-			pinfo->blk_m = (int)_blk_m;
-			pinfo->blk_l = (int)_blk_l;
-			pinfo->stk_s = (int)_stks.size();
-			pinfo->stk_m = (int)_stkm.size();
-			pinfo->stk_l = (int)_stkl.size();
-		}
-
-		inline size_t blksize_s()
-		{
-			return _sz_s;
-		}
-	private:
-		void *_ps, *_pm, *_pl;
-		spinlock* _pmutex;
-		size_t _sz_s, _sz_m, _sz_l;  //blocks size
-		size_t _blk_s, _blk_m, _blk_l; // blocks number
-		std::vector<void*> _stks; // small memory blocks
-		std::vector<void*> _stkm; // medium memory blocks
-		std::vector<void*> _stkl; // large memory blocks
-		int _nsys_malloc; //malloc memery blocks
-
-		bool malloc_block(size_t blksize, size_t blknum, void * &ph, std::vector<void*> &stk)
-		{
-			if (!blknum || !blksize)
-				return false;
-			size_t i;
-			ph = ::malloc(blksize * blknum);
-			if (ph) {
-				uint8_t *p = (uint8_t *)ph;
-				stk.reserve(blknum + 2u - blknum % 2);
-				for (i = 0; i < blknum; i++)
-					stk.push_back(p + (blknum - 1 - i) * blksize);
-			}
-			return ph != nullptr;
-		}
-
-		void *_malloc(size_t size, size_t &outsize, bool bext = false)
-		{
-			void* pr = nullptr;
-			if (size <= _sz_s) {
-				if (!_stks.empty() && (pr = _stks.back())) {
-					_stks.pop_back();
-					outsize = _sz_s;
-					return pr;
-				}
-			}
-			if (size <= _sz_m) {
-				if (!_pm)
-					malloc_block(_sz_m, _blk_m, _pm, _stkm);
-				if (!_stkm.empty() && (pr = _stkm.back())) {
-					_stkm.pop_back();
-					outsize = _sz_m;
-					return pr;
-				}
-				if (!_pl)
-					malloc_block(_sz_l, _blk_l, _pl, _stkl);
-				if (_pl && _stkl.size() > _blk_l / 2u) {
-					if (nullptr != (pr = _stkl.back())) {
-						_stkl.pop_back();
-						outsize = _sz_l;
-						return pr;
-					}
-				}
-			}
-			else if (size <= _sz_l) {
-				if (!_pl)
-					malloc_block(_sz_l, _blk_l, _pl, _stkl);
-				if (!_stkl.empty() && (pr = _stkl.back())) {
-					_stkl.pop_back();
-					outsize = _sz_l;
-					return pr;
-				}
-			}
+			void *pret = _stkmalloc(size, outsize);
+			if (pret)
+				return pret;
 			if (bext) {
 				if (size % 16)
 					size += 16 - size % 16;
 				size += size / 2;
 			}
 			outsize = size;
-			pr = ::malloc(size);
-			if (!pr)
-				outsize = 0;
-			else
-				_nsys_malloc++;
-			return pr;
+			return ::malloc(size);
 		}
-
-		void *_realloc(void *ptr, size_t size)
+		void *malloc(size_t size)
 		{
-			if (!ptr && !size)
-				return nullptr;
+			size_t zlen = 0;
+			void *p = _stkmalloc(size, zlen);
+			if (p)
+				return p;
+			return ::malloc(size);
+		}
+		void *realloc(void *ptr, size_t size, size_t &outsize)
+		{
+			if (!ptr)
+				return  malloc(size, outsize);
 			if (!size) {
-				_free(ptr);
+				free(ptr);
+				outsize = 0;
 				return nullptr;
 			}
-			size_t pa = (size_t)ptr, st = 0;
-			if (_ps && pa >= (size_t)_ps  && pa < (size_t)_ps + _sz_s * _blk_s) {
-				if (size <= _sz_s)
-					return ptr;
-				void* p = _malloc(size, st);
-				if (!p)
-					return nullptr;
-				memcpy(p, ptr, _sz_s);
-				_stks.push_back(ptr);
-				return p;
+			size_t ptrsize = _stkblksize(ptr);
+			if (!ptrsize) {
+				outsize = size;
+				return ::realloc(ptr, size); // ptrsize==0 means that ptr is allocated by the system
 			}
-			else if (_pm &&  pa >= (size_t)_pm  && pa < (size_t)_pm + _sz_m * _blk_m) {
-				if (size <= _sz_m)
-					return ptr;
-				void* p = _malloc(size, st);
-				if (!p)
-					return nullptr;
-				memcpy(p, ptr, _sz_m);
-				_stkm.push_back(ptr);
-				return p;
-			}
-			else if (_pl &&  pa >= (size_t)_pl  && pa < (size_t)_pl + _sz_l * _blk_l) {
-				if (size <= _sz_l)
-					return ptr;
-				void* p = _malloc(size, st);
-				if (!p)
-					return nullptr;
-				memcpy(p, ptr, _sz_l);
-				_stkl.push_back(ptr);
-				return p;
-			}
-			return ::realloc(ptr, size);
-		}
 
-		void _free(void *pmem)
-		{
-			if (!pmem)
-				return;
-			size_t pa = (size_t)pmem;
-			if (_ps && pa >= (size_t)_ps  && pa < (size_t)_ps + _sz_s * _blk_s)
-				_stks.push_back(pmem);
-			else if (_pm &&  pa >= (size_t)_pm  && pa < (size_t)_pm + _sz_m * _blk_m)
-				_stkm.push_back(pmem);
-			else if (_pl &&  pa >= (size_t)_pl  && pa < (size_t)_pl + _sz_l * _blk_l)
-				_stkl.push_back(pmem);
-			else {
-				::free(pmem);
-				_nsys_malloc--;
+			if (ptrsize >= size && ptrsize < size * 2) {
+				outsize = ptrsize;
+				return ptr; // No need to adjust memory
 			}
+
+			void *p = malloc(size, outsize);
+			if (p) {
+				if (outsize == ptrsize) { // No need to adjust memory
+					free(p);
+					return ptr;
+				}
+				memcpy(p, ptr, ptrsize <= size ? ptrsize : size);
+				free(ptr);
+			}
+			else
+				outsize = 0;
+			return p;
+		}
+		void free(void *p)
+		{
+			if (!_stkfree(p))
+				::free(p);
+		}
+		size_t blksize_s()
+		{
+			if (!_numstk)
+				return 0;
+			return _stks[0]->blksize();
+		}
+	public: //Adapt to the previous version
+		inline void *mem_malloc(size_t size)
+		{
+			return this->malloc(size);
+		}
+		void* mem_calloc(size_t count, size_t size)
+		{
+			void* p = malloc(count * size);
+			if (p)
+				memset(p, 0, count * size);
+			return p;
+		}
+		inline void *mem_realloc(void *ptr, size_t size)
+		{
+			size_t zlen = 0;
+			return this->realloc(ptr, size, zlen);
+		}
+		inline void mem_free(void *p)
+		{
+			this->free(p);
+		}
+	private:
+		spinlock* _plock;
+		size_t _numstk;
+		stk*   _stks[EC_MEM_MAX_STKS];
+	private:
+		static int compare(const void* p1, const void* p2)
+		{
+			const stk *ps1 = *((const stk**)p1);
+			const stk *ps2 = *((const stk**)p2);
+			if (ps1->blksize() < ps2->blksize())
+				return -1;
+			else if (ps1->blksize() == ps2->blksize())
+				return 0;
+			return 1;
+		}
+		void *_stkmalloc(size_t size, size_t &outlen)
+		{
+			void * pret = nullptr;
+			if (_plock)
+				_plock->lock();
+			int nup = 0;
+			for (auto i = 0u; i < _numstk; i++) {
+				if (_stks[i]->blksize() < size)
+					continue;
+				if (_stks[i]->empty()) {
+					++nup;
+					if (nup >= EC_MEM_UPLEVEL)
+						break;
+				}
+				else {
+					outlen = _stks[i]->blksize();
+					pret = _stks[i]->pop();
+					break;
+				}
+			}
+			if (_plock)
+				_plock->unlock();
+			return pret;
+		}
+		bool _stkfree(void *p)
+		{
+			if (!p)
+				return true;
+			bool bret = false;
+			if (_plock)
+				_plock->lock();
+			for (auto i = 0u; i < _numstk; i++) {
+				if (_stks[i]->free(p)) {
+					bret = true;
+					break;
+				}
+			}
+			if (_plock)
+				_plock->unlock();
+			return bret;
+		}
+		size_t _stkblksize(void *p)
+		{
+			size_t z = 0;
+			if (_plock)
+				_plock->lock();
+			for (auto i = 0u; i < _numstk; i++) {
+				if (_stks[i]->in(p)) {
+					z = _stks[i]->blksize();
+					break;
+				}
+			}
+			if (_plock)
+				_plock->unlock();
+			return z;
 		}
 	};
 
@@ -281,8 +362,10 @@ namespace ec {
 		}
 		autobuf(size_t size, memory* pmem = nullptr) :_pmem(pmem), _size(size)
 		{
-			if (_pmem)
-				_pbuf = (value_type*)_pmem->mem_malloc(_size * sizeof(value_type));
+			if (_pmem) {
+				_pbuf = (value_type*)_pmem->malloc(size * sizeof(value_type), _size);
+				_size /= sizeof(value_type);
+			}
 			else
 				_pbuf = (value_type*)::malloc(_size * sizeof(value_type));
 			if (!_pbuf)
@@ -323,7 +406,7 @@ namespace ec {
 		{
 			if (_pbuf) {
 				if (_pmem)
-					_pmem->mem_free(_pbuf);
+					_pmem->free(_pbuf);
 				else
 					::free(_pbuf);
 				_pbuf = nullptr;
@@ -336,16 +419,21 @@ namespace ec {
 			clear();
 			if (!rsz)
 				return nullptr;
-			if (_pmem)
-				_pbuf = (value_type*)_pmem->mem_malloc(rsz * sizeof(value_type));
-			else
+			if (_pmem) {
+				_pbuf = (value_type*)_pmem->malloc(rsz * sizeof(value_type), _size);
+				_size /= sizeof(value_type);
+			}
+			else {
 				_pbuf = (value_type*)::malloc(rsz * sizeof(value_type));
-			if (!_pbuf)
+				_size = rsz;
+			}
+			if (!_pbuf) {
+				_size = 0;
 				return nullptr;
-			_size = rsz;
+			}
 			return _pbuf;
 		}
-	};
+};
 	template <class _CLS, size_t _Num>
 	class mem_sets
 	{

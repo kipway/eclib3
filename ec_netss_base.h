@@ -2,7 +2,7 @@
 \file ec_netsrv_base.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.11.3
+\update 2021.1.12
 
 session class for net::server.
 
@@ -200,8 +200,6 @@ namespace ec
 			{
 				_ip[0] = 0;
 				_timelastio = ::time(0);
-				_rbuf.reserve(1024 * 8);
-				_sbuf.reserve(1024 * 16);
 			}
 			session(session* p) : _listenid(p->_listenid), _protoc(p->_protoc), _status(p->_status), _fd(p->_fd), _ucid(p->_ucid)
 				, _timelastio(p->_timelastio), _timesndblcok(p->_timesndblcok), _time_err(p->_time_err)
@@ -212,8 +210,6 @@ namespace ec
 				memcpy(_ip, p->_ip, sizeof(_ip));
 				p->_fd = INVALID_SOCKET;//move
 				p->_pextdata = nullptr; //move
-				_rbuf.reserve(1024 * 8);
-				_sbuf.reserve(1024 * 16);
 			}
 			virtual ~session()
 			{

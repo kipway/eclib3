@@ -2,7 +2,7 @@
 \file ec_vector.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.26
+\update 2021.1.12
 
 vector
 	a extend vector class for trivially copyable type, and expanded some functions, can be used as string, stack, stream
@@ -148,7 +148,13 @@ namespace ec
 			sizeout = size;
 			return ::malloc(size);
 		}
-
+		inline void *mem_realloc(void* ptr, size_t size, size_t &sizeout)
+		{
+			if (_pmem)
+				return _pmem->realloc(ptr, size, sizeout);
+			sizeout = size;
+			return ::realloc(ptr, size);
+		}
 		inline void mem_free(void* p)
 		{
 			if (_pmem)
@@ -294,7 +300,7 @@ namespace ec
 
 		void shrink_to_fit()
 		{
-			if (!_usize) {
+			if (!_usize) { // free memory if empty
 				if (_pbuf)
 					mem_free(_pbuf);
 				_pbuf = nullptr;
@@ -302,16 +308,12 @@ namespace ec
 				_ubufsize = 0;
 				return;
 			}
-			if (_usize > _ubufsize / 2 || _ubufsize < 16) // less 1/2 shrink to fit
-				return;
-			if (_pmem && _ubufsize <= _pmem->blksize_s())
+			if (_usize > _ubufsize / 2 || _ubufsize < 64) // No need to adjust
 				return;
 			size_t sizeout = 0, sizenew = _usize + ((_usize % 8) ? (8u - _usize % 8) : 0);
-			value_type* pnew = (value_type*)mem_malloc(sizenew * sizeof(value_type), sizeout);
+			value_type* pnew = (value_type*)mem_realloc(_pbuf, sizenew * sizeof(value_type), sizeout);
 			if (!pnew)
 				return;
-			memcpy(pnew, _pbuf, _usize * sizeof(value_type));
-			mem_free(_pbuf);
 			_pbuf = pnew;
 			_ubufsize = sizeout / sizeof(value_type);
 		}
@@ -539,7 +541,7 @@ namespace ec
 				return *this;
 			return append((const value_type*)s, strlen(s));
 		}
-		
+
 		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
 		inline vector &append(const _Str &s)
 		{

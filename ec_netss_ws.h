@@ -2,7 +2,7 @@
 \file ec_netsrv_ws.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.26
+\update 2021.1.12
 
 net server http/ws session class
 
@@ -40,8 +40,6 @@ namespace ec
 				_txt(ps->_pssmem), _wsmsg(ps->_pssmem),
 				_comp(0), _opcode(WS_OP_TXT), _pwsmem(ps->_pssmem), _pwslog(ps->_psslog)
 			{
-				_txt.reserve(1024 * 16);
-				_wsmsg.reserve(1024 * 16);
 			}
 		public:
 			uint32_t _ucid;
@@ -197,6 +195,7 @@ namespace ec
 			void reset_msg()
 			{
 				_wsmsg.clear();
+				_wsmsg.shrink_to_fit();
 				_comp = 0;
 				_opcode = WS_OP_TXT;
 			}
