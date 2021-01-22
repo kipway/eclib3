@@ -2,7 +2,7 @@
 \file ec_memory.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.1.12
+\update 2021.1.22
 
 memory
 	fast memory allocator class for vector,hashmap etc.
@@ -41,9 +41,9 @@ namespace ec {
 		public:
 			stk(size_t blksize, size_t blknum) : _blksize(blksize), _pos(0)
 			{
-				if (blksize % EC_MEM_ALIGN_SIZE)
-					blksize += EC_MEM_ALIGN_SIZE - blksize % EC_MEM_ALIGN_SIZE;
-				_pbuf = (unsigned char*)::malloc(blksize * blknum);
+				if (_blksize % EC_MEM_ALIGN_SIZE)
+					_blksize += EC_MEM_ALIGN_SIZE - _blksize % EC_MEM_ALIGN_SIZE;
+				_pbuf = (unsigned char*)::malloc(_blksize * blknum);
 				if (!_pbuf)
 					return;
 				_pstk = (void**)::malloc(blknum * sizeof(void*));
@@ -56,7 +56,7 @@ namespace ec {
 					return;
 				}
 				for (auto i = _blknum; i > 0; i--)
-					_pstk[_pos++] = _pbuf + (i - 1)* blksize;
+					_pstk[_pos++] = _pbuf + (i - 1)* _blksize;
 			}
 			~stk()
 			{
@@ -162,29 +162,8 @@ namespace ec {
 			_stks[_numstk++] = p;
 			if (_numstk < 2)
 				return;
-			qsort(_stks, _numstk, sizeof(stk*), compare);			
-		}
-		/*
-		bool add_blk(size_t blksize, size_t blknum)
-		{
-			if (!blksize || !blknum)
-				return true;
-			unique_spinlock lck(_plock);
-			if (EC_MEM_MAX_STKS == _numstk)
-				return false;
-			stk* p = new stk(blksize, blknum);
-			if (!p)
-				return false;
-			if (p->empty()) {
-				delete p;
-				return false;
-			}
-			_stks[_numstk++] = p;
-			if (_numstk < 2)
-				return true;
 			qsort(_stks, _numstk, sizeof(stk*), compare);
-			return true;
-		}*/
+		}		
 		void *malloc(size_t size, size_t &outsize, bool bext = false)
 		{
 			void *pret = _stkmalloc(size, outsize);
