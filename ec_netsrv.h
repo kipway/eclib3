@@ -2,7 +2,7 @@
 \file ec_netsrv.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.10.12
+\update 2021.2.3
 
 net::server
 	a class for TCP/UDP, HTTP/HTTPS, WS/WSS
@@ -56,6 +56,19 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_vector.h"
 #include "ec_netio.h"
 #include "ec_string.h"
+
+#ifndef _WIN32
+#include <sys/resource.h>
+#endif
+
+#ifndef SIZE_RESERVED_NOFILE  // reserved number of FD
+#define SIZE_RESERVED_NOFILE 80
+#endif
+
+#ifndef SIZE_WIN_NOFILE_LIMT  // windows max number of FD
+#define SIZE_WIN_NOFILE_LIMT 50000
+#endif
+
 namespace ec
 {
 	namespace net
@@ -73,7 +86,17 @@ namespace ec
 				SOCKET _fd;
 				int   _srvtype;// server type , EC_NET_SRV_TCP, EC_NET_SRV_IPC, EC_NET_SRV_UDP
 			};
-
+			static int get_nofile_lim_max()
+			{
+#ifdef _WIN32
+				return SIZE_WIN_NOFILE_LIMT;
+#else
+				struct rlimit rout;
+				if (getrlimit(RLIMIT_NOFILE, &rout))
+					return SIZE_WIN_NOFILE_LIMT;
+				return rout.rlim_cur;
+#endif
+			}
 		protected:
 			hashmap<uint32_t, t_listen> _maplisten;
 			memory* _pmem; // Memory allocator
@@ -138,7 +161,7 @@ namespace ec
 							if (_plog)
 								_plog->add(CLOG_DEFAULT_MSG, "%s create success, ucid start %u", _sucidfile, _unextid);
 							char sid[40] = { 0 };
-							if(snprintf(sid, sizeof(sid), "%u", _unextid) > 0)
+							if (snprintf(sid, sizeof(sid), "%u", _unextid) > 0)
 								fwrite(sid, 1, strlen(sid), pf);
 							fclose(pf);
 						}
@@ -541,7 +564,7 @@ namespace ec
 					FILE *pf = fopen(_sucidfile, "wt");
 					if (pf) {
 						char sid[40] = { 0 };
-						if(snprintf(sid, sizeof(sid), "%u", _unextid) > 0)
+						if (snprintf(sid, sizeof(sid), "%u", _unextid) > 0)
 							fwrite(sid, 1, strlen(sid), pf);
 						fclose(pf);
 						if (_plog)
@@ -928,6 +951,17 @@ namespace ec
 					return false;
 				}
 #endif
+				if ((int)_map.size() + SIZE_RESERVED_NOFILE > get_nofile_lim_max()) {
+#ifdef _WIN32
+					shutdown(sAccept, SD_BOTH);
+					::closesocket(sAccept);
+#else
+					shutdown(sAccept, SHUT_RDWR);
+					::close(sAccept);
+#endif
+					_plog->add(CLOG_DEFAULT_ERR, "TCP server port(%d) error EMFILE reserved!", pl->_wport);
+					return false;
+				}
 				onaccept(listenid, sAccept);
 				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog);
 				if (!pi) {
@@ -992,6 +1026,17 @@ namespace ec
 				if (_plog)
 					_plog->add(CLOG_DEFAULT_MOR, "ipc port(%u) connect from local", pl->_wport);
 #endif
+				if ((int)_map.size() + SIZE_RESERVED_NOFILE > get_nofile_lim_max()) {
+#ifdef _WIN32
+					shutdown(sAccept, SD_BOTH);
+					::closesocket(sAccept);
+#else
+					shutdown(sAccept, SHUT_RDWR);
+					::close(sAccept);
+#endif
+					_plog->add(CLOG_DEFAULT_ERR, "IPC server port(%d) error EMFILE reserved!", pl->_wport);
+					return false;
+				}
 				tcpnodelay(sAccept);
 				setkeepalive(sAccept);
 				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog);

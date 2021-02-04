@@ -2,7 +2,7 @@
 \file ec_vector.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.1.12
+\update 2021.1.28
 
 vector
 	a extend vector class for trivially copyable type, and expanded some functions, can be used as string, stack, stream
@@ -444,6 +444,13 @@ namespace ec
 			_grown(n);
 			memcpy(_pbuf + _usize, pdata, n * sizeof(value_type));
 			_usize += n;
+			return *this;
+		}
+
+		vector& append(const value_type &v)
+		{ // like std::string::append
+			_grown(1);
+			_pbuf[_usize++] = v;
 			return *this;
 		}
 
