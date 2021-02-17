@@ -2,7 +2,7 @@
 \file ec_tls12.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.1.11
+\update 2021.2.8
 
 TLS1.2(rfc5246)  session class
 
@@ -46,7 +46,11 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_log.h"
 
 #ifdef _WIN32
+#ifdef _OPENSSL_1_1_X
+#pragma comment(lib,"libcrypto.lib")
+#else
 #pragma comment(lib,"libeay32.lib")
+#endif
 #endif
 
 #include "openssl/rand.h"
@@ -76,6 +80,10 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #define TLS_SESSION_APPDATA 3   // on app data
 
 #define TLS_REC_BUF_SIZE (1024 * 18)
+
+#ifndef _OPENSSL_1_1_X
+#define X509_get0_pubkey_bitstr(_x509) (_x509)->cert_info->key->public_key
+#endif
 namespace ec
 {
 	template<class _Out>
@@ -96,11 +104,12 @@ namespace ec
 		if (!_px509)
 			return false;
 		pout->clear();
-		pout->append(_px509->cert_info->key->public_key->data, (size_t)_px509->cert_info->key->public_key->length);
+		pout->append(X509_get0_pubkey_bitstr(_px509)->data, (size_t)X509_get0_pubkey_bitstr(_px509)->length);
 
 		X509_free(_px509);
 		return true;
 	}
+
 	namespace tls {
 		enum rec_contenttype {
 			rec_change_cipher_spec = 20,
@@ -827,14 +836,16 @@ namespace ec
 				_px509 = d2i_X509(NULL, &p, (long)ulen);//only use first Certificate
 				if (!_px509)
 					return false;
+
 				if (_pubkeylen) { // need to verify the server legitimacy
 					bool bok = true;
 					int i;
-					if (_px509->cert_info->key->public_key->length != _pubkeylen)
+					ASN1_BIT_STRING * pstr = X509_get0_pubkey_bitstr(_px509);
+					if (pstr->length != _pubkeylen)
 						bok = false;
 					else {
-						for (i = 0; i < _px509->cert_info->key->public_key->length; i++) {
-							if (_px509->cert_info->key->public_key->data[i] != _pubkey[i]) {
+						for (i = 0; i < pstr->length; i++) {
+							if (pstr->data[i] != _pubkey[i]) {
 								bok = false;
 								break;
 							}
@@ -846,6 +857,7 @@ namespace ec
 						return false;
 					}
 				}
+
 				_pevppk = X509_get_pubkey(_px509);
 				if (!_pevppk) {
 					X509_free(_px509);
