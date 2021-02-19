@@ -1,8 +1,8 @@
-/*!
+ï»¿/*!
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.15
+\update 2021.2.18
 
 array
 	a extended array class for trivially copyable type
@@ -13,21 +13,20 @@ source repository : https://github.com/kipway
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 
-Description£º
+Description
 ec::array is not same as std::array. it's like a vector with fixed-size capacity.And expanded some functions, can be used as string, stack, stream
 
 iterator: a random access iterator to value_type
 
-remark£º
+remark
 
 size_type size() const;
 Returns the number of elements in the array.
 This is the number of actual objects held in the array, which is not necessarily equal to its storage capacity.
 
 size_type max_size() noexcept;
-Return maximum size
 Returns the maximum number of elements that the array container can hold.
-The max_size of an array object, just like its size, is always equal to the second template parameter used to instantiate the array template class.
+The max_size of an array object, is always equal to the second template parameter used to instantiate the array template class.
 
 size_type capacity() const;
 same as max_size();
@@ -215,7 +214,7 @@ namespace ec {
 
 		void fill(const value_type &v) noexcept
 		{
-			for (auto i = i; i < _Num; i++)
+			for (auto i = 0; i < _Num; i++)
 				_data[i] = v;
 			_size = _Num;
 		}
