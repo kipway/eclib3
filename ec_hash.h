@@ -50,4 +50,14 @@ namespace ec
 			return uHash;
 		}
 	};
+
+	struct hash_istr {
+		size_t  operator()(const char*  key)
+		{
+			register unsigned int uHash = 0;
+			while (char ch = *key++)
+				uHash = uHash * 31 + tolower(ch);
+			return uHash;
+		}
+	};
 }

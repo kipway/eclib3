@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.1.12
+\update 2021.2.24
 
 string , bytes and string functions
 
@@ -70,7 +70,6 @@ namespace std
 	EC_STR_LRG_SIZE, EC_STR_LRG_NUMS,\
 	&ec_stringspinlock);\
 	ec::memory* p_ec_string_allocator = &ec_stringallocator;
-
 
 extern ec::memory* p_ec_string_allocator;
 struct ec_string_alloctor {
@@ -996,8 +995,8 @@ namespace ec
 					nb = 3;
 				else if (c >= 0xE0)
 					nb = 2;
-				else if (c >= 0xC0)
-					nb = 1;
+//				else if (c >= 0xC0) // GBK -> UTF8  > 2bytes
+//					nb = 1;
 				else
 					return false;
 				continue;
@@ -1424,4 +1423,125 @@ namespace ec
 		}
 		return true;
 	}
+
+	template<class _STR = std::string>
+	size_t utf8_substr(_STR &s, size_t sublen) // return substr size
+	{
+		if (s.size() <= sublen)
+			return s.size();
+		if (s.empty())
+			return 0;
+		uint8_t uc;
+		size_t pos = s.size() - 1;
+		while (pos > 0) {
+			uc = s[pos];
+			if ((uc < 0x80 || uc >= 0xC0) && pos <= sublen)
+				break;
+			--pos;
+		}
+		s.resize(pos);
+		return pos;
+	}
+
+	template<typename charT, class = typename std::enable_if<sizeof(charT) == 1>::type>
+	size_t utf8_substr(charT *s, size_t size, size_t sublen) // return substr size
+	{
+		if (size <= sublen)
+			return size;
+		if (!s || !*s || !size)
+			return 0;
+		uint8_t uc;
+		size_t pos = size - 1;
+		while (pos > 0) {
+			uc = s[pos];
+			if ((uc < 0x80 || uc >= 0xC0) && pos <= sublen)
+				break;
+			--pos;
+		}
+		s[pos] = 0;
+		return pos;
+	}
+
+	template<typename charT, class = typename std::enable_if<sizeof(charT) == 1>::type>
+	size_t utf8_strlcpy(charT* sd, const charT* ss, size_t count)
+	{// like strlcpy for linux,add null to the end of sd,return strlen(ss), count is sd size
+		if (!ss || !(*ss)) {
+			if (sd && count)
+				*sd = '\0';
+			return 0;
+		}
+		const size_t srclen = strlen(ss);
+		if (!sd || !count)
+			return srclen;
+		if (srclen < count) {
+			memcpy(sd, ss, srclen + 1);
+			return srclen;
+		}
+		size_t pos = 0;
+		uint8_t uc;
+		int i, nb;
+		while ((uc = *ss) && pos + 1 < count) {
+			if (uc < 0x80 || (uc >> 6) == 0x10) {
+				*sd++ = *ss++;
+				++pos;
+				continue;
+			}
+			nb = 0;
+			for (i = 2; i < 6; i++) {
+				if ((uc >> i) == (0xFF >> i)) {
+					nb = 8 - i;
+					break;
+				}
+			}
+			if (!nb || pos + nb >= count || pos + nb > srclen)
+				break;
+			memcpy(sd, ss, nb);
+			sd += nb;
+			ss += nb;
+			pos += nb;
+		}
+		*sd = '\0';
+		return srclen;
+	}
+
+	template<typename charT
+		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+		bool jstr_needesc(const charT* src, size_t srcsize)
+	{
+		bool besc = false;
+		for (auto i = 0u; i < srcsize; i++) {
+			if (src[i] == '\\' || src[i] == '\"') {
+				besc = true;
+				break;
+			}
+		}
+		return besc;
+	}
+
+	template<typename _Str>
+	const char* jstr_toesc(const char* s, size_t srcsize, _Str &so) //escape  '\' -> '\\', '"' -> '\"'
+	{
+		so.clear();
+		const char *se = s + srcsize;
+		while (s < se) {
+			if (*s == '\\' || *s == '\"')
+				so += '\\';
+			so += *s++;
+		}
+		return so.c_str();
+	}
+
+	template<typename _Str>
+	const char* jstr_fromesc(const char* s, size_t srcsize, _Str &so) // delete escape, "\\" -> '\', ""\'" -> '"'  so
+	{
+		so.clear();
+		const char *se = s + srcsize;
+		while (s < se) {
+			if (*s == '\\' && s + 1 < se && (*(s + 1) == '\"' || *(s + 1) == '\\'))
+				s++;
+			so += *s++;
+		}
+		return so.c_str();
+	}
+
 }// namespace ec

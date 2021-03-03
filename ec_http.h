@@ -99,7 +99,7 @@ namespace ec
 					t_mime t;
 					memset(&t, 0, sizeof(t));
 					ec::strlcpy(t.sext, key.c_str(), sizeof(t.sext));
-					strncpy(t.stype, val.c_str(), sizeof(t.stype));
+					ec::strlcpy(t.stype, val.c_str(), sizeof(t.stype));
 					_mime.set(t.sext, t);
 				}
 				return 0;

@@ -2,7 +2,7 @@
 \file ec_protobuf.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.18
+\update 2021.3.2
 
 classes to encode/decode google protocol buffer,support proto3
 
@@ -201,7 +201,7 @@ namespace ec
 			bool out_fixed32(_Tp v, _Out * pout)  //out 32-bit (fixed32,sfixed32,float)
 		{
 			if (isbig()) {
-				uint32_t uv = bswap_32(*((uint32_t*)&v));
+				uint32_t uv; memcpy(&uv, &v, 4); uv = bswap_32(uv);
 				try {
 					pout->append((uint8_t*)&uv, sizeof(uv));
 					return true;
@@ -227,7 +227,7 @@ namespace ec
 			bool out_fixed64(_Tp v, _Out * pout)  //out 64-bit (fixed64,sfixed64,double)
 		{
 			if (isbig()) {
-				uint64_t uv = bswap_64(*((uint64_t*)&v));
+				uint64_t uv; memcpy(&uv, &v, 8); uv = bswap_64(uv);
 				try {
 					pout->append((uint8_t*)&uv, sizeof(uv));
 					return true;

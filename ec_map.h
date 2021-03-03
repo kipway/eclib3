@@ -265,7 +265,7 @@ namespace ec
 		}
 
 		void clear() noexcept
-		{ // if value_type is a pointer, You can release it in fun
+		{
 			if (!_ppv)
 				return;
 			if (_usize) {
@@ -285,7 +285,7 @@ namespace ec
 		}
 
 		bool erase(key_type key) noexcept
-		{ // if value_type is a pointer, You can release it in fun
+		{
 			if (nullptr == _ppv || !_usize)
 				return false;
 			size_type upos = _Hasher()(key) % _uhashsize;

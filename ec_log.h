@@ -89,7 +89,6 @@ namespace ec
 		udplog(int nlev = CLOG_DEFAULT_MSG) : _level(nlev), _socket(INVALID_SOCKET)
 		{
 			memset(&_srvaddr, 0, sizeof(_srvaddr));
-			memset(&_cabin, 0, sizeof(_cabin));
 		}
 		virtual ~udplog() {
 			if (_socket != INVALID_SOCKET) {
