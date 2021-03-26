@@ -2,11 +2,11 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.2.24
+\update 2021.3.20
 
 string , bytes and string functions
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2021, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -648,13 +648,11 @@ namespace ec
 #if (0 != USE_EC_STRING)
 	using string = string_<ec_string_alloctor>;
 #endif
-
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		int stricmp(const charT*s1, const charT*s2)
+	
+	inline int stricmp(const char*s1, const char*s2)
 	{
 #ifdef _WIN32
-		return ::stricmp(s1, s2);
+		return ::_stricmp(s1, s2);
 #else
 		return ::strcasecmp(s1, s2);
 #endif
@@ -682,9 +680,8 @@ namespace ec
 		return srclen;
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		char *strncpy_s(charT *dest, size_t destsize, const charT* src, size_t srcsize)
+	template<typename charT>
+	char *strncpy_s(charT *dest, size_t destsize, const charT* src, size_t srcsize)
 	{ // safe copy, always adding a null character at the end of dest
 		if (!dest || !destsize)
 			return dest;
@@ -695,13 +692,12 @@ namespace ec
 
 		if (destsize <= srcsize)
 			srcsize = destsize - 1;
-		memcpy(dest, src, srcsize);
+		memcpy(dest, src, srcsize * sizeof(charT));
 		dest[srcsize] = '\0';
 		return dest;
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+	template<typename charT>
 		bool streq(const charT* s1, const charT* s2)
 	{ // return true: equal; false not equal
 		if (!s1 || !s2)
@@ -713,8 +709,7 @@ namespace ec
 		return *s1 == '\0' && *s2 == '\0';
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+	template<typename charT>
 		bool strieq(const charT* s1, const charT* s2)
 	{ //case insensitive equal. return true: equal; false not equal
 		if (!s1 || !s2)
@@ -728,8 +723,7 @@ namespace ec
 		return *s1 == '\0' && *s2 == '\0';
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+	template<typename charT>
 		bool strineq(const charT* s1, const charT* s2, size_t s2size, bool balls1 = false)// Judge n characters equal case insensitive
 	{
 		if (!s1 || !s2)
@@ -782,11 +776,10 @@ namespace ec
 		\param outsize output buffer length
 		*/
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+	template<typename charT>
 		const char* strnext(const charT cp, const charT* src, size_t srcsize, size_t &pos, charT *sout, size_t outsize)
 	{
-		char c;
+		charT c;
 		size_t i = 0;
 		while (pos < srcsize) {
 			c = src[pos++];
@@ -831,11 +824,10 @@ namespace ec
 	\param outsize output buffer length
 	*/
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+	template<typename charT>
 		const char* strnext(const charT* split, const charT* src, size_t srcsize, size_t &pos, charT *sout, size_t outsize)
 	{
-		char c;
+		charT c;
 		size_t i = 0;
 		while (pos < srcsize) {
 			c = src[pos++];
@@ -870,8 +862,7 @@ namespace ec
 		return 0;
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+	template<typename charT>
 		bool char2hex(charT c, unsigned char *pout)
 	{
 		if (c >= 'a' && c <= 'f')
@@ -938,10 +929,8 @@ namespace ec
 		}
 		return (int)so.size();
 	}
-
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		char *strupr(charT *str)
+	
+	inline 	char* strupr(char *str)
 	{
 #ifdef _WIN32
 		return _strupr(str);
@@ -956,9 +945,7 @@ namespace ec
 #endif
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		char *strlwr(charT *str)
+	inline char* strlwr(char *str)
 	{
 #ifdef _WIN32
 		return _strlwr(str);
@@ -995,8 +982,8 @@ namespace ec
 					nb = 3;
 				else if (c >= 0xE0)
 					nb = 2;
-//				else if (c >= 0xC0) // GBK -> UTF8  > 2bytes
-//					nb = 1;
+				//else if (c >= 0xC0) // GBK -> UTF8  > 2bytes
+				//nb = 1;
 				else
 					return false;
 				continue;
@@ -1544,4 +1531,33 @@ namespace ec
 		return so.c_str();
 	}
 
+	template<typename charT>
+	bool strneq(const charT* s1, const charT* s2, size_t  n)
+	{
+		if (!s1 || !s2)
+			return false;
+		size_t i = 0;
+		for (; i < n; i++) {
+			if (!s1[i] || !s2[i])
+				break;
+			if (s1[i] != s2[i])
+				return false;
+		}
+		return i == n;
+	}
+
+	template<typename charT>
+	bool strnieq(const charT* s1, const charT* s2, size_t  n)
+	{
+		if (!s1 || !s2)
+			return false;
+		size_t i = 0;
+		for (; i < n; i++) {
+			if (!s1[i] || !s2[i])
+				break;
+			if (tolower(s1[i]) != tolower(s2[i]))
+				return false;
+		}
+		return i == n;
+	}
 }// namespace ec

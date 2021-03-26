@@ -2,7 +2,7 @@
 \file ec_jsonx.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.9
+\update 2021.3.15
 
 json
 	a fast json parse class
@@ -40,6 +40,35 @@ namespace ec
 			int _type;
 		};
 
+		struct t_keys {
+			const char* _ks[4] = { nullptr };
+			t_keys(const char* s1)
+			{
+				_ks[0] = s1;
+			}
+			t_keys(const char* s1, const char* s2)
+			{
+				_ks[0] = s1;
+				_ks[1] = s2;
+			}
+			t_keys(const char* s1, const char* s2, const char* s3)
+			{
+				_ks[0] = s1;
+				_ks[1] = s2;
+				_ks[2] = s3;
+			}
+			t_keys(const char* s1, const char* s2, const char* s3, const char* s4)
+			{
+				_ks[0] = s1;
+				_ks[1] = s2;
+				_ks[2] = s3;
+				_ks[3] = s4;
+			}
+			const char** operator()()
+			{
+				return _ks;
+			}
+		};
 	public:
 		std::vector<t_kv> _kvs;
 	public:
@@ -82,6 +111,18 @@ namespace ec
 			for (const auto &i : _kvs) {
 				if (i._k.ieq(key))
 					return &i._v;
+			}
+			return nullptr;
+		}
+
+		const txt* getval(const char **keys, size_t zsize)
+		{
+			size_t i, n = _kvs.size(), j;
+			for (i = 0; i < n; i++) {
+				for (j = 0; j < zsize; j++) {
+					if (_kvs[i]._k.ieq(keys[j]))
+						return &_kvs[i]._v;
+				}
 			}
 			return nullptr;
 		}
