@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.3.20
+\update 2021.4.18
 
 string , bytes and string functions
 
@@ -480,6 +480,16 @@ namespace ec
 			if (zlen > 0)
 				setsize_(_pstr, zlen - 1);
 		}
+		
+		inline const char& back() const
+		{
+			return _pstr[size() - 1];
+		}
+
+		inline char& back()
+		{
+			return _pstr[size() - 1];
+		}
 
 		void resize(size_t n, char c = 0) noexcept
 		{
@@ -930,7 +940,7 @@ namespace ec
 		return (int)so.size();
 	}
 	
-	inline 	char* strupr(char *str)
+    inline 	char* strupr(char *str)
 	{
 #ifdef _WIN32
 		return _strupr(str);

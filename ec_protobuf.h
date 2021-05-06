@@ -2,11 +2,11 @@
 \file ec_protobuf.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.3.2
+\update 2021.3.29
 
 classes to encode/decode google protocol buffer,support proto3
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2021, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -420,6 +420,8 @@ namespace ec
 			, class = typename std::enable_if<std::is_integral<_Tp>::value>::type>
 			bool out_var(_Out* po, int id, _Tp v, bool zigzag = false)
 		{
+			if (!v) //default 0
+				return true;
 			if (zigzag)
 				return out_key(id, pb_varint, po) && out_varint(t_zigzag<_Tp>().encode(v), po);
 			using utype = typename std::conditional < sizeof(_Tp) < 8u, uint32_t, uint64_t > ::type;
@@ -514,6 +516,8 @@ namespace ec
 			size_t size_var(int id, _Tp v, bool zigzag = false) const
 		{
 			using utype = typename std::conditional < sizeof(_Tp) < 8u, uint32_t, uint64_t > ::type;
+			if (!v)
+				return 0; //default 0
 			if (zigzag)
 				return size_key(id, pb_varint) + size_varint(t_zigzag<_Tp>().encode(v));
 			return size_key(id, pb_varint) + size_varint((utype)v);
