@@ -2,7 +2,7 @@
 \file ec_netsrv_base.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.1.12
+\update 2021.5.6
 
 session class for net::server.
 
@@ -200,10 +200,11 @@ namespace ec
 			{
 				_ip[0] = 0;
 				_timelastio = ::time(0);
+				_timeconnect = ec::mstime();
 			}
 			session(session* p) : _listenid(p->_listenid), _protoc(p->_protoc), _status(p->_status), _fd(p->_fd), _ucid(p->_ucid)
 				, _timelastio(p->_timelastio), _timesndblcok(p->_timesndblcok), _time_err(p->_time_err)
-				, _pause_r(p->_pause_r), _peerport(p->_peerport), _pextdata(p->_pextdata)
+				, _pause_r(p->_pause_r), _peerport(p->_peerport), _timeconnect(p->_timeconnect), _pextdata(p->_pextdata)
 				, _pssmem(p->_pssmem), _psslog(p->_psslog), _rbuf(p->_pssmem)
 				, _sndpos(p->_sndpos), _sbuf(p->_pssmem)
 			{
@@ -274,6 +275,7 @@ namespace ec
 			time_t   _time_err;
 			int      _pause_r; // 1:pause read; 0: normal read
 			uint16_t _peerport;// peerport
+			int64_t  _timeconnect; // GMT from 1970-1-1 millisecond(1/1000 second)
 		private:
 			ssext_data* _pextdata; //application session extension data
 		protected:

@@ -196,7 +196,7 @@ namespace ec
 		 \return	0:success. -1:error.
 		 \remark    if sdbfile is exist return -1;
 		 */
-		int create_file(const char* sdbfile, uint32_t maxrecs, uint32_t blksize, const char * sappflag)
+		int create_file(const char* sdbfile, uint32_t maxrecs, uint32_t blksize, const char * sappflag, bool bsync = true)
 		{
 			if (blksize < RFL_MINBLKSIZE || blksize > RFL_MAXBLKSIZE || maxrecs < RFL_MINRECS || maxrecs > RFL_MAXRECS) {
 				_errcode = RFLE_PARAM;
@@ -210,7 +210,10 @@ namespace ec
 			_filesize = 0;
 
 			_errcode = RFLE_FILEIO;
-			if (!Open(sdbfile, OF_RDWR | OF_CREAT | OF_SYNC, OF_SHARE_READ))
+			uint32_t uflag = OF_RDWR | OF_CREAT;
+			if (bsync)
+				uflag |= OF_SYNC;
+			if (!Open(sdbfile, uflag, OF_SHARE_READ))
 				return -1;
 			while (1) {
 				unique_filelock flck(this, 0, 0, true);

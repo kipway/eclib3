@@ -2,7 +2,7 @@
 \file ec_vector.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.1.28
+\update 2021.5.5
 
 vector
 	a extend vector class for trivially copyable type, and expanded some functions, can be used as string, stack, stream
@@ -578,6 +578,16 @@ namespace ec
 			if (!s)
 				return *this;
 			return append((const value_type*)s, strlen(s));
+		}
+
+		template<typename T
+			, class = typename std::enable_if<sizeof(_Tp) == 1 && std::is_same<T, char>::value>::type>
+			vector &assign(const T* s,size_t size)
+		{
+			clear();
+			if (!s || !size)
+				return *this;
+			return append((const value_type*)s, size);
 		}
 
 		template<typename T

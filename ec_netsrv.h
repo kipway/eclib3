@@ -2,7 +2,7 @@
 \file ec_netsrv.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.2.3
+\update 2021.5.6
 
 net::server
 	a class for TCP/UDP, HTTP/HTTPS, WS/WSS
@@ -1044,6 +1044,12 @@ namespace ec
 					::closesocket(sAccept);
 					return false;
 				}
+#ifdef _WIN32
+				pi->setip(inet_ntoa(addrClient.sin_addr));
+				pi->_peerport = ntohs(addrClient.sin_port);
+#else
+				pi->setip(addrClient.sun_path);
+#endif
 				_map.set(pi->_ucid, pi);
 				onconnect(listenid, pi->_ucid);
 				return true;

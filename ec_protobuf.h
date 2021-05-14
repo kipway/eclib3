@@ -2,7 +2,7 @@
 \file ec_protobuf.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.3.29
+\update 2021.5.6
 
 classes to encode/decode google protocol buffer,support proto3
 
@@ -18,6 +18,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include <stdint.h>
 #include <memory.h>
 #include <string>
+#include <vector>
 #ifdef _MSC_VER
 #ifndef bswap_16
 #	define bswap_16(x) _byteswap_ushort(x)
@@ -90,8 +91,8 @@ namespace ec
 						nb = 3;
 					else if (c >= 0xE0)
 						nb = 2;
-					else if (c >= 0xC0)
-						nb = 1;
+					//else if (c >= 0xC0) // GBK -> UTF8  > 2bytes
+					//	nb = 1;
 					else
 						return false;
 					continue;
@@ -629,6 +630,35 @@ namespace ec
 		inline size_t size()
 		{
 			return size_content();
+		}
+
+		template<class _OBJ>
+		size_t size_obj_array(int objid, std::vector<_OBJ> &vs)
+		{
+			size_t zu = 0;
+			for (auto &i : vs) {
+				zu += i.size(objid);
+			}
+			return zu;
+		}
+
+		template<class _OBJ>
+		bool out_obj_array(_Out * pout, int objid, std::vector<_OBJ> &vs)
+		{
+			for (auto &i : vs) {
+				if (!i.serialize(objid, pout))
+					return false;
+			}
+			return true;
+		}
+
+		template<class _OBJ>
+		bool parse_obj_array(const void* pdata, size_t sizedata, std::vector<_OBJ> &vs) {
+			_OBJ t;
+			bool bret = t.parse(pdata, sizedata);
+			if (bret)
+				vs.push_back(std::move(t));
+			return bret;
 		}
 
 		inline bool serialize(_Out* pout)
