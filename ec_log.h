@@ -2,7 +2,7 @@
 \file ec_log.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.7
+\update 2021.5.23
 
 ilog
 	A client log base class
@@ -100,27 +100,23 @@ namespace ec
 		{
 			if (!str || !*str)
 				return -1;
-			str80 sip;
-			ec::strargs args;
-			if (4 != ec::strsplit(":/", str, strlen(str), args, 4))
+			size_t pos = 0, zl = strlen(str);
+			char sprotocol[8] = { 0 }, sip[40] = { 0 }, sport[8] = { 0 }, scabin[80] = { 0 };
+			if (!ec::strnext(":/", str, zl, pos, sprotocol, sizeof(sprotocol))
+				|| !ec::strnext(":/", str, zl, pos, sip, sizeof(sip))
+				|| !ec::strnext("/", str, zl, pos, sport, sizeof(sport))
+				|| !ec::strnext('\n', str, zl, pos, scabin, sizeof(scabin))
+				)
 				return -1;
-			for (auto & i : args)
-				i.trim();
-			uint16_t uport = (uint16_t)args[2].stoi();
-			if (!args[0].ieq("udp") || !uport || args[1].get(sip) <= 0 || args[3].get(_cabin) <= 0)
-				return -1;
-			if (INADDR_NONE == inet_addr(sip.c_str())) {
-				str80 t = sip;
-				if (ec::net::get_ip_by_domain(t.c_str(), sip) < 0)
-					return -1;
-			}
+			_cabin.assign(scabin);
+			uint16_t uport = (uint16_t)atoi(sport);
 			if (_socket != INVALID_SOCKET) {
 				::closesocket(_socket);
 				_socket = INVALID_SOCKET;
 			}
 			memset(&_srvaddr, 0, sizeof(_srvaddr));
 			_srvaddr.sin_family = AF_INET;
-			_srvaddr.sin_addr.s_addr = inet_addr(sip.c_str());
+			_srvaddr.sin_addr.s_addr = inet_addr(sip);
 			_srvaddr.sin_port = htons(uport);
 			_socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
