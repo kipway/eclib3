@@ -549,20 +549,14 @@ namespace ec
 			bool parse(const char *surl, size_t urlsize)
 			{
 				ec::strargs ss;
-				ec::strsplit(":/", surl, urlsize, ss, 3);
+				ec::strsplit(":/", surl, urlsize, ss, 4);
 				if (ss.size() < 2)
 					return false;
 				_protocol.clear();
 				_ip.clear();
+				_path.clear();
 
 				_protocol.append(ss[0]._str, ss[0]._size);
-				if (ss.size() > 2) {
-					_port = ss[2].stoi();
-					if (!_port)
-						return false;
-				}
-				else
-					_port = 0;
 
 				_ip.append(ss[1]._str, ss[1]._size);
 				if (INADDR_NONE == inet_addr(_ip.c_str())) {
@@ -570,12 +564,27 @@ namespace ec
 					if (ec::net::get_ip_by_domain(t.c_str(), _ip) < 0)
 						return false;
 				}
+
+				if ((ss.size() > 2) && (*(ss[2]._str - 1) == ':')) {
+					_port = ss[2].stoi();
+					if (ss.size() > 3)
+						_path.append(ss[3]._str, urlsize);
+
+					if (!_port)
+						return false;
+				}
+				else {
+					_port = 0;
+					_path.append(ss[2]._str, urlsize);
+				}
+
 				return true;
 			}
 		public:
 			uint16_t _port;
 			std::string _protocol;
 			std::string _ip;
+			std::string _path;
 		};
 	}//net
 }// ec

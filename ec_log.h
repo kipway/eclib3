@@ -2,7 +2,7 @@
 \file ec_log.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.5.23
+\update 2021.5.31
 
 ilog
 	A client log base class
@@ -169,7 +169,7 @@ namespace ec
 		int _level;
 		SOCKET	_socket;
 		struct	sockaddr_in _srvaddr;
-		str32 _cabin;
+		str128 _cabin;
 	};
 
 	class prtlog : public ec::ilog // log print to current terminal

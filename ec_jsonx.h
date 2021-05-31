@@ -2,7 +2,7 @@
 \file ec_jsonx.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.3.15
+\update 2021.5.29
 
 json
 	a fast json parse class
@@ -218,6 +218,134 @@ namespace ec
 			if (sp && s > sp + 1)
 				sout.append(sp, s - sp);
 		}
+
+		template<typename _Str>
+		void fromjstr(const char* s, size_t srcsize, _Str &sout) // delete escape, "\\" -> '\', ""\'" -> '"' and set to sout
+		{
+			sout.clear();
+			if (!s || !srcsize)
+				return;
+			bool besc = false;
+			for (auto i = 0u; i < srcsize; i++) {
+				if (s[i] == '\\') {
+					besc = true;
+					break;
+				}
+			}
+			if (!besc) {
+				sout.append(s, srcsize);
+				return;
+			}
+
+			const char *se = s + srcsize;
+			while (s < se) {
+				if (*s == '\\' && s + 1 < se && (*(s + 1) == '\"' || *(s + 1) == '\\'))
+					s++;
+				sout += *s++;
+			}
+		}
+
+		template<typename _VAL>
+		bool get_jnumber(const char* key, _VAL &val)
+		{
+			const ec::json::t_kv *pkv;
+			pkv = getkv(key);
+			val = 0;
+			if (!pkv || pkv->_v.empty())
+				return false;
+			if (std::is_integral<_VAL>::value)
+				val = (_VAL)pkv->_v.stoll();
+			else if (std::is_floating_point<_VAL>::value)
+				val = (_VAL)pkv->_v.stof();
+			return true;
+		}
+
+		template<typename _STR>
+		bool get_jstring(const char* key, _STR &val)
+		{
+			const ec::json::t_kv *pkv;
+			pkv = getkv(key);
+			val.clear();
+			if (!pkv)
+				return false;
+			fromjstr(pkv->_v._str, pkv->_v._size, val);
+			return true;
+		}
+
+		template<typename _STR>
+		bool get_jstr_array(const char* key, std::vector<_STR>& vals)
+		{
+			const ec::json::t_kv *pkv;
+			pkv = getkv(key);
+			if (!pkv || pkv->_v.empty())
+				return true;
+			if (pkv->_type != ec::json::jarray)
+				return false;
+
+			ec::json jvs;
+			if (!jvs.from_str(pkv->_v._str, pkv->_v._size))
+				return false;
+
+			for (auto i = 0u; i < jvs.size(); i++) {
+				pkv = jvs.at(i);
+				if (pkv && !pkv->_v.empty()) {
+					_STR v;
+					fromjstr(pkv->_v._str, pkv->_v._size, v);
+					vals.push_back(std::move(v));
+				}
+			}
+			return true;
+		}
+
+		template<typename _VAL>
+		bool get_jnumber_array(const char* key, std::vector<_VAL>& vals)
+		{
+			const ec::json::t_kv *pkv;
+			pkv = getkv(key);
+			if (!pkv || pkv->_v.empty())
+				return true;
+			if (pkv->_type != ec::json::jarray)
+				return false;
+
+			ec::json jvs;
+			if (!jvs.from_str(pkv->_v._str, pkv->_v._size))
+				return false;
+
+			for (auto i = 0u; i < jvs.size(); i++) {
+				pkv = jvs.at(i);
+				if (pkv && !pkv->_v.empty()) {
+					if (std::is_integral<_VAL>::value)
+						vals.push_back((_VAL)pkv->_v.stoll());
+					else if (std::is_floating_point<_VAL>::value)
+						vals.push_back((_VAL)pkv->_v.stof());
+				}
+			}
+			return true;
+		}
+
+		template<typename _CLS>
+		bool get_jobj_array(const char* key, std::vector<_CLS>& vals)
+		{
+			const ec::json::t_kv *pkv;
+			pkv = getkv(key);
+			if (!pkv || pkv->_v.empty())
+				return true;
+			if (pkv->_type != ec::json::jarray)
+				return false;
+
+			ec::json jvs;
+			if (!jvs.from_str(pkv->_v._str, pkv->_v._size))
+				return false;
+
+			for (auto i = 0u; i < jvs.size(); i++) {
+				_CLS v;
+				pkv = jvs.at(i);
+				if (pkv && !pkv->_v.empty() && v.fromjson(pkv->_v._str, pkv->_v._size))
+					vals.push_back(std::move(v));
+			}
+			return true;
+		}
+
 	private:
 		bool from_obj(txt &s)
 		{
