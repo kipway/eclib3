@@ -2,7 +2,7 @@
 \file ec_netsrv.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.5.6
+\update 2021.7.6
 
 net::server
 	a class for TCP/UDP, HTTP/HTTPS, WS/WSS
@@ -52,6 +52,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #define EC_NET_SRV_TCP  0 // TCP server
 #define EC_NET_SRV_IPC  1 // IPC server
 #define EC_NET_SRV_UDP  2 // UDP server
+#define EC_NET_SRV_UNIX 3 // AF_UNIX server
 
 #include "ec_vector.h"
 #include "ec_netio.h"
@@ -67,6 +68,10 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 
 #ifndef SIZE_WIN_NOFILE_LIMT  // windows max number of FD
 #define SIZE_WIN_NOFILE_LIMT 50000
+#endif
+
+#ifdef USE_AF_WIN
+#include <afunix.h>
 #endif
 
 namespace ec
@@ -112,7 +117,8 @@ namespace ec
 			time_t _time_lastrun;
 			int   _pauseread; // 1: pause read ;0 : read
 		protected:
-			hashmap<uint32_t, t_ssbufsize> _mapbufsize;// send buffer size map,  todo _mapbufsize的多线程操作
+			block_allocator _sndbufblks;
+			hashmap<uint32_t, t_ssbufsize> _mapbufsize;// send buffer block size map
 #if (0 != ECNETSRV_TLS)
 			tls::srvca _ca;  // certificate
 #endif
@@ -129,6 +135,7 @@ namespace ec
 				, _nerr_emfile_count(0)
 				, _unextid(UCID_DYNAMIC_START)
 				, _unextsrvid(0)
+				, _sndbufblks(EC_NET_SNDBUF_BLOCKSIZE, EC_NET_SNDBUF_GLOBALSIZE / EC_NET_SNDBUF_BLOCKSIZE)
 				, _udpbuf(pmem)
 			{
 				_pollkey.reserve(1024);
@@ -147,11 +154,12 @@ namespace ec
 					FILE *pf = fopen(_sucidfile, "rt");
 					if (pf) {
 						char sid[40] = { 0 };
-						fread(sid, 1, sizeof(sid) - 1u, pf);
+						if (fread(sid, 1, sizeof(sid) - 1u, pf) > 0) {
+							_unextid = (uint32_t)atoll(sid);
+							if (_plog)
+								_plog->add(CLOG_DEFAULT_MSG, "read %s success,ucid start %u", _sucidfile, _unextid);
+						}
 						fclose(pf);
-						_unextid = (uint32_t)atoll(sid);
-						if (_plog)
-							_plog->add(CLOG_DEFAULT_MSG, "read %s success,ucid start %u", _sucidfile, _unextid);
 						if (_unextid < UCID_DYNAMIC_START)
 							_unextid = UCID_DYNAMIC_START;
 					}
@@ -220,7 +228,7 @@ namespace ec
 					ni.key = nextsrvid();
 				else
 					ni.key = listenid;
-				listen_session *p = new listen_session(ni.key, ni._fd, _pmem, _plog);
+				listen_session *p = new listen_session(ni.key, ni._fd, _pmem, _plog, &_sndbufblks);
 				if (!p) {
 					::closesocket(ni._fd);
 					return 0;
@@ -250,7 +258,7 @@ namespace ec
 					ni.key = nextsrvid();
 				else
 					ni.key = ucid;
-				listen_session *p = new listen_session(ni.key, ni._fd, _pmem, _plog);
+				listen_session *p = new listen_session(ni.key, ni._fd, _pmem, _plog, &_sndbufblks);
 				if (!p) {
 					::closesocket(ni._fd);
 					return 0;
@@ -260,7 +268,33 @@ namespace ec
 				_bmodify_pool = true;
 				return ni.key;
 			}
+#if !defined _WIN32 || defined USE_AF_WIN
+			uint32_t add_afunixsrv(uint32_t ucid, const char* sapth)
+			{
+				if (exist_srv(0, EC_NET_SRV_UNIX))
+					return 0;
 
+				t_listen ni;
+				ni._wport = 0;
+				ni._srvtype = EC_NET_SRV_UNIX;
+				ni._fd = listen_afunix(sapth);
+				if (INVALID_SOCKET == ni._fd)
+					return 0;
+				if (!ucid)
+					ni.key = nextsrvid();
+				else
+					ni.key = ucid;
+				listen_session *p = new listen_session(ni.key, ni._fd, _pmem, _plog, &_sndbufblks);
+				if (!p) {
+					::closesocket(ni._fd);
+					return 0;
+				}
+				_maplisten.set(ni.key, ni);
+				_map.set(ni.key, (PNETSS)p);
+				_bmodify_pool = true;
+				return ni.key;
+			}
+#endif
 			uint32_t add_udpsrv(uint32_t ucid, uint16_t port, const char* sip = nullptr)
 			{
 				if (!port || exist_srv(port, EC_NET_SRV_UDP))
@@ -292,7 +326,7 @@ namespace ec
 				ni._srvtype = EC_NET_SRV_UDP;
 				ni._fd = s;
 
-				session_udpsrv *p = new session_udpsrv(ni.key, ni._fd, _pmem, _plog);
+				session_udpsrv *p = new session_udpsrv(ni.key, ni._fd, _pmem, _plog, &_sndbufblks);
 				if (!p) {
 					::closesocket(ni._fd);
 					return 0;
@@ -394,6 +428,16 @@ namespace ec
 				return sip;
 			}
 
+			bool getpeerurl(uint32_t ucid, std::string &sout)
+			{
+				PNETSS pi = nullptr;
+				if (!_map.get(ucid, pi))
+					return false;
+				sout = pi->_ip;
+				sout.append(":").append(std::to_string(pi->_peerport));
+				return true;
+			}
+
 			void set_status(uint32_t ucid, int32_t st)
 			{
 				PNETSS pi = nullptr;
@@ -435,9 +479,6 @@ namespace ec
 
 			int flushsend(uint32_t ucid) // return >=0:ok ; -1:error
 			{
-				PNETSS pi = nullptr;
-				if (_map.get(ucid, pi))
-					return pi->flush_sendbuf();
 				return 0;
 			}
 
@@ -677,6 +718,12 @@ namespace ec
 								if (acp_ipc(puid[i]))
 									_bmodify_pool = true;
 							}
+#if !defined _WIN32 || defined USE_AF_WIN
+							else if (EC_NET_SRV_UNIX == nsrvtye) {
+								if (acp_afunix(puid[i]))
+									_bmodify_pool = true;
+							}
+#endif
 							else if (EC_NET_SRV_UDP == nsrvtye) {
 								_udpbuf.clear();
 								struct sockaddr_in addr;
@@ -716,15 +763,17 @@ namespace ec
 							onconnect(ps->_listenid, puid[i]);
 						}
 						else {
-							if (ps->send_c() < 0) {
+							if ((n = ps->sendbuf()) < 0) {
 								closeucid(puid[i]);
 								continue;
 							}
+							if (n > 0)
+								_plog->add(CLOG_DEFAULT_DBG, "ucid(%u) send buf %d bytes, number blocks %zu", puid[i], n, ps->datablks());
 							onsend_c_end(puid[i], ps->_protoc, ps->_listenid);
 						}
 						t_ssbufsize t;
 						t.key = puid[i];
-						t.usize = (uint32_t)ps->sndbufsize();
+						t.usize = (uint32_t)ps->datablks();// > sndbufsize();
 						if (t.usize)
 							_mapbufsize.set(t.key, t);
 						else
@@ -738,7 +787,7 @@ namespace ec
 							continue;
 						if ((ps->_protoc & EC_NET_SS_CONOUT) && ps->_status == EC_NET_ST_PRE)
 							p[i].events = POLLOUT;
-						else if (ps->sndbufsize())
+						else if (!ps->sndbufempty())
 							p[i].events = POLLOUT | POLLIN;
 						else
 							p[i].events = POLLIN;
@@ -875,6 +924,48 @@ namespace ec
 				}
 				return sl;
 			}
+
+#if !defined _WIN32 || defined USE_AF_WIN
+			SOCKET listen_afunix(const char* spath)
+			{
+				SOCKET sl = INVALID_SOCKET;
+				if ((sl = socket(AF_UNIX, SOCK_STREAM, 0)) == INVALID_SOCKET)
+					return INVALID_SOCKET;
+
+				struct sockaddr_un Addr;
+				memset(&Addr, 0, sizeof(Addr));
+				Addr.sun_family = AF_UNIX;
+				snprintf(Addr.sun_path, sizeof(Addr.sun_path), "%s", spath);
+				unlink(Addr.sun_path);
+				if (bind(sl, (const sockaddr *)&Addr, sizeof(Addr)) == SOCKET_ERROR) {
+#ifdef _WIN32
+					int nerr = ::WSAGetLastError();
+					::closesocket(sl);
+#else
+					int nerr = errno;
+					::close(sl);
+#endif
+					if (_plog)
+						_plog->add(CLOG_DEFAULT_ERR, "af_unix [%s] bind failed with error %d", spath, nerr);
+					fprintf(stderr, "ERR:af_unix [%s] bind failed with error %d\n", spath, nerr);
+					return INVALID_SOCKET;
+				}
+				if (listen(sl, SOMAXCONN) == SOCKET_ERROR) {
+#ifdef _WIN32
+					int nerr = ::WSAGetLastError();
+					closesocket(sl);
+#else
+					int nerr = errno;
+					::close(sl);
+#endif
+					if (_plog)
+						_plog->add(CLOG_DEFAULT_ERR, "af_unix [%s]  listen failed with error %d", spath, nerr);
+					fprintf(stderr, "ERR: af_unix [%s]  listen failed with error %d\n", spath, nerr);
+					return INVALID_SOCKET;
+				}
+				return sl;
+			}
+#endif
 		private:
 			void make_pollfds()
 			{
@@ -963,7 +1054,7 @@ namespace ec
 					return false;
 				}
 				onaccept(listenid, sAccept);
-				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog);
+				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog, &_sndbufblks);
 				if (!pi) {
 					::closesocket(sAccept);
 					return false;
@@ -1039,7 +1130,7 @@ namespace ec
 				}
 				tcpnodelay(sAccept);
 				setkeepalive(sAccept);
-				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog);
+				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog, &_sndbufblks);
 				if (!pi) {
 					::closesocket(sAccept);
 					return false;
@@ -1054,7 +1145,71 @@ namespace ec
 				onconnect(listenid, pi->_ucid);
 				return true;
 			}
+#ifdef _WIN32
+			int SetNoBlock(SOCKET s)
+			{
+				u_long iMode = 1;
+				return ioctlsocket(s, FIONBIO, &iMode);
+			}
+#endif
 
+#if !defined _WIN32 || defined USE_AF_WIN
+			bool acp_afunix(uint32_t listenid)
+			{
+				SOCKET sAccept;
+				struct sockaddr_un addrClient;
+
+				int		nClientAddrLen = sizeof(addrClient);
+				t_listen* pl = _maplisten.get(listenid);
+				if (!pl)
+					return false;
+
+				if ((sAccept = ::accept(pl->_fd, (struct sockaddr*)(&addrClient), (socklen_t*)&nClientAddrLen)) == INVALID_SOCKET) {
+#ifdef _WIN32
+					int nerr = WSAGetLastError();
+					if (WSAEMFILE == nerr)
+#else
+					int nerr = errno;
+					if (EMFILE == nerr)
+#endif
+					{
+						if (!_nerr_emfile_count && _plog)
+							_plog->add(CLOG_DEFAULT_ERR, "ipc af_unix server error EMFILE!");
+						_nerr_emfile_count++;
+						on_emfile();
+					}
+					else
+						_nerr_emfile_count = 0;
+					return false;
+				}
+
+				if (SetNoBlock(sAccept) < 0) {
+					::closesocket(sAccept);
+					_plog->add(CLOG_DEFAULT_ERR, "ipc af_unix server SetNoBlock(sAccept) failed!");
+					return false;
+				}
+
+				if (_plog)
+					_plog->add(CLOG_DEFAULT_MOR, "ipc af_unix connect from local");
+
+				if ((int)_map.size() + SIZE_RESERVED_NOFILE > get_nofile_lim_max()) {
+					::closesocket(sAccept);
+					_plog->add(CLOG_DEFAULT_ERR, "IPC server af_unix error EMFILE reserved!");
+					return false;
+				}
+				tcpnodelay(sAccept);
+				setkeepalive(sAccept);
+				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog, &_sndbufblks);
+				if (!pi) {
+					::closesocket(sAccept);
+					return false;
+				}
+				pi->setip(addrClient.sun_path);
+				_map.set(pi->_ucid, pi);
+				onconnect(listenid, pi->_ucid);
+				return true;
+			}
+#endif
 			void doread(uint32_t ucid, SOCKET fd)// return true need remake pollfds
 			{
 				char rbuf[SIZE_TCP_READ_ONCE];

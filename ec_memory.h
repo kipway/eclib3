@@ -2,7 +2,7 @@
 \file ec_memory.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.1.22
+\update 2021.7.6
 
 memory
 	fast memory allocator class for vector,hashmap etc.
@@ -163,7 +163,7 @@ namespace ec {
 			if (_numstk < 2)
 				return;
 			qsort(_stks, _numstk, sizeof(stk*), compare);
-		}		
+		}
 		void *malloc(size_t size, size_t &outsize, bool bext = false)
 		{
 			void *pret = _stkmalloc(size, outsize);
@@ -228,6 +228,16 @@ namespace ec {
 			if (!_numstk)
 				return 0;
 			return _stks[0]->blksize();
+		}
+		size_t blksize(int n)
+		{
+			if (n >= (int)_numstk || n < 0)
+				return 0;
+			return _stks[n]->blksize();
+		}
+		int numstack()
+		{
+			return (int)_numstk;
 		}
 	public: //Adapt to the previous version
 		inline void *mem_malloc(size_t size)
@@ -412,7 +422,7 @@ namespace ec {
 			}
 			return _pbuf;
 		}
-};
+	};
 	template <class _CLS, size_t _Num>
 	class mem_sets
 	{
@@ -524,5 +534,215 @@ namespace ec {
 		size_t _blksize;
 		size_t _pos;
 		std::vector<mem_item*> _mems;
+	};
+
+	class block_allocator
+	{
+	private:
+		size_t _blksize;
+		size_t _blknum;
+		uint8_t* _pbuf;
+		std::vector<void*> _stack;
+
+	public:
+		block_allocator(size_t blksize, size_t blknum) :_blksize(blksize), _blknum(blknum)
+		{
+			_stack.reserve(_blknum);
+			_pbuf = (uint8_t*)::malloc(_blksize * _blknum);
+			if (_pbuf) {
+				for (auto i = _blknum; i > 0; i--)
+					_stack.push_back(_pbuf + (i - 1) * _blksize);
+			}
+		}
+
+		~block_allocator() {
+			if (_pbuf) {
+				::free(_pbuf);
+				_pbuf = nullptr;
+				_stack.clear();
+			}
+		}
+
+		void _free(void *p)
+		{
+			if (size_t(p) >= (size_t)_pbuf && (size_t)p < (size_t)_pbuf + _blksize * _blknum)
+				_stack.push_back(p);
+			else
+				::free(p);
+		}
+
+		void* _malloc()
+		{
+			if (_stack.empty())
+				return ::malloc(_blksize);
+			void *p = _stack.back();
+			_stack.pop_back();
+			return p;
+		}
+
+		inline size_t get_blksize()
+		{
+			return _blksize;
+		}
+	};
+
+	class cycle_fifo // cycle FIFO bytes buffer
+	{
+	public:
+		struct blk_ {
+			uint32_t pos;
+			uint32_t len;
+			uint8_t *buf;
+		};
+	private:
+		block_allocator* _pallocator;
+		blk_* _pbuf;
+		size_t _head, _tail, _numblks;
+
+		size_t blkappend(blk_* pblk, const uint8_t* p, size_t len)
+		{
+			if (!p || !len)
+				return 0;
+			size_t zadd = _pallocator->get_blksize() - pblk->len;
+			if (zadd) {
+				if (len < zadd)
+					zadd = len;
+				memcpy(pblk->buf + pblk->len, p, zadd);
+				pblk->len += (uint32_t)zadd;
+			}
+			return zadd;
+		}
+	public:
+		cycle_fifo(const cycle_fifo&) = delete;
+		cycle_fifo& operator = (const cycle_fifo&) = delete;
+		cycle_fifo(size_t size, block_allocator* pallocator) :_pallocator(pallocator), _head(0), _tail(0) {
+			if (!size) {
+				_numblks = 4;
+				_pbuf = nullptr;
+				return;
+			}
+
+			_numblks = size / pallocator->get_blksize();
+			if (_numblks < 4)
+				_numblks = 4;
+			_pbuf = (blk_*)::malloc(_numblks * sizeof(blk_));
+			memset(_pbuf, 0, sizeof(_numblks * sizeof(blk_)));
+		}
+
+		cycle_fifo(cycle_fifo &&v)  //move construct
+		{
+			_pallocator = v._pallocator;
+			_pbuf = v._pbuf;
+			_head = v._head;
+			_tail = v._tail;
+			_numblks = v._numblks;
+
+			v._pallocator = nullptr;
+			v._pbuf = nullptr;
+			v._head = 0;
+			v._tail = 0;
+			v._numblks = 0;
+		}
+
+		~cycle_fifo() {
+			while (!empty())
+				pop();
+			if (_pbuf) {
+				::free(_pbuf);
+				_pbuf = nullptr;
+			}
+		}
+
+		cycle_fifo& operator = (cycle_fifo&& v) // for move
+		{
+			this->~cycle_fifo();
+			_pallocator = v._pallocator;
+			_pbuf = v._pbuf;
+			_head = v._head;
+			_tail = v._tail;
+			_numblks = v._numblks;
+
+			v._pallocator = nullptr;
+			v._pbuf = nullptr;
+			v._head = 0;
+			v._tail = 0;
+			v._numblks = 0;
+			return *this;
+		}
+
+		inline bool isnull()
+		{
+			return _pbuf == nullptr;
+		}
+
+		inline bool empty() {
+			return _head == _tail;
+		}
+
+		blk_* top() // get at head
+		{
+			if (_head == _tail)
+				return nullptr;
+			return _pbuf + _head;
+		}
+
+		bool append(const uint8_t* p, size_t len)
+		{
+			if (!p || !len)
+				return true;
+			size_t zadd = 0, zt;
+			if (_head != _tail) //not empty, try add to last block
+				zadd = blkappend(_pbuf + ((_tail + _numblks - 1) % _numblks), p, len);
+			while (zadd < len) {
+				if (((_tail + 1) % _numblks) == _head)
+					return false;// full
+				_pbuf[_tail].buf = (uint8_t*)_pallocator->_malloc();
+				if (!_pbuf[_tail].buf)
+					return false;
+				zt = _pallocator->get_blksize();
+				if (zt > len - zadd)
+					zt = len - zadd;
+				memcpy(_pbuf[_tail].buf, p + zadd, zt);
+				_pbuf[_tail].pos = 0;
+				_pbuf[_tail].len = (uint32_t)zt;
+				_tail = (_tail + 1) % _numblks;
+				zadd += zt;
+			}
+			return true;
+		}
+
+		void pop() // remove from head
+		{
+			if (_head == _tail)
+				return;
+			if (_pbuf[_head].buf)
+				_pallocator->_free(_pbuf[_head].buf);
+			_pbuf[_head].buf = nullptr;
+			_pbuf[_head].len = 0;
+			_pbuf[_head].pos = 0;
+			_head = (_head + 1) % _numblks;
+		}
+
+		size_t size()
+		{
+			size_t h = _head, t = _tail;
+			uint32_t zlen = 0;;
+			while (h != t) {
+				zlen += _pbuf[h].len - _pbuf[h].pos;
+				h = (h + 1) % _numblks;
+			}
+			return zlen;
+		}
+
+		size_t blks()
+		{
+			return _head == _tail ? 0 : (_tail + _numblks - _head) % _numblks;
+		}
+
+		int waterlevel()
+		{
+			size_t numblk = blks() * 10000;
+			return static_cast<int>(numblk / (_numblks - 1));
+		}
 	};
 }

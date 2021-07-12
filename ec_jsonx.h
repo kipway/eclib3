@@ -2,7 +2,7 @@
 \file ec_jsonx.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.5.29
+\update 2021.6.11
 
 json
 	a fast json parse class
@@ -333,19 +333,18 @@ namespace ec
 			if (pkv->_type != ec::json::jarray)
 				return false;
 
-			ec::json jvs;
+			ec::json jvs, jv;
 			if (!jvs.from_str(pkv->_v._str, pkv->_v._size))
 				return false;
 
 			for (auto i = 0u; i < jvs.size(); i++) {
 				_CLS v;
 				pkv = jvs.at(i);
-				if (pkv && !pkv->_v.empty() && v.fromjson(pkv->_v._str, pkv->_v._size))
+				if (pkv && !pkv->_v.empty() && jv.from_str(pkv->_v._str, pkv->_v._size) && v.fromjson(jv))
 					vals.push_back(std::move(v));
 			}
 			return true;
 		}
-
 	private:
 		bool from_obj(txt &s)
 		{
@@ -546,4 +545,99 @@ namespace ec
 		sjs.swap(jso);
 		return 0;
 	}
+	namespace js {
+		template<typename _STRVAL, typename _STROUT>
+		void out_jstring(int &nf, const char* key, const _STRVAL& val, _STROUT & sout)
+		{
+			if (val.empty())
+				return;
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			sout.append(key).append("\":\"");
+			if (!ec::jstr_needesc(val.data(), val.size())) {
+				sout.append(val.data(), val.size()).push_back('"');
+				return;
+			}
+
+			const char *s = val.data(), *se = s + val.size();
+			while (s < se) {
+				if (*s == '\\' || *s == '\"')
+					sout += '\\';
+				sout += *s++;
+			}
+			sout.push_back('"');
+		}
+
+		template<typename _VAL, typename _STROUT>
+		void out_jnumber(int &nf, const char* key, _VAL val, _STROUT & sout)
+		{
+			if (std::is_integral<_VAL>::value && !val)
+				return; //整数0为默认值不输出
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			sout.append(key).append("\":");
+			sout.append(std::to_string(val).c_str());
+		}
+
+		template<typename _CLS, typename _STROUT>
+		void out_jobj_array(int &nf, const char* key, _CLS& vals, _STROUT & sout)
+		{
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			sout.append(key).append("\":[");
+
+			int n = 0;
+			for (auto &obj : vals) {
+				if (n)
+					sout.push_back(',');
+				obj.tojson(sout);
+				++n;
+			}
+			sout.push_back(']');
+		}
+
+		template<typename _STR, typename _STROUT>
+		void out_jstr_array(int &nf, const char* key, std::vector<_STR>& vals, _STROUT & sout)
+		{
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			sout.append(key).append("\":[");
+
+			int n = 0;
+			for (auto &obj : vals) {
+				if (n)
+					sout.push_back(',');
+				ec::out_jstr(obj.data(), obj.size(), sout);
+				++n;
+			}
+			sout.push_back(']');
+		}
+
+		template<typename _VAL, typename _STROUT>
+		void out_jnumber_array(int &nf, const char* key, std::vector<_VAL>& vals, _STROUT & sout)
+		{
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			sout.append(key).append("\":[");
+
+			int n = 0;
+			for (auto &v : vals) {
+				if (n)
+					sout.push_back(',');
+				sout.append(std::to_string(v));
+				++n;
+			}
+			sout.push_back(']');
+		}
+	}//js
 }// ec

@@ -2,7 +2,7 @@
 \file ec_config.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.30
+\update 2021.7.5
 
 namespace cfg 
 	tools for ini, config file.
@@ -278,9 +278,11 @@ namespace ec
 				return false;
 			return setval(&fs, fun, so);
 		}
-
+		inline bool iscommentchar(int c, int commentchar = 0) {
+			return ('#' == c || ';' == c) && (0 == commentchar || c == commentchar);
+		}
 		template<class rstream>
-		bool scan(rstream *pf, std::function<int(const std::string &blk, const std::string &key, const std::string &val)>fun)
+		bool scan(rstream *pf, std::function<int(const std::string &blk, const std::string &key, const std::string &val)>fun, int commentchar = 0)
 		{ // fun return 0: continue; Non-zero: stop scan
 			if (!pf)
 				return false;
@@ -293,11 +295,15 @@ namespace ec
 				switch (c) {
 				case '#':
 				case ';':
-					while ((c = pf->getc()) != EOF) {
-						if ('\n' == c || '\r' == c)
-							break;
+					if (iscommentchar(c, commentchar)) {
+						while ((c = pf->getc()) != EOF) {
+							if ('\n' == c || '\r' == c)
+								break;
+						}
+						key.clear();
 					}
-					key.clear();
+					else
+						key += c;
 					break;
 				case  '[':
 					blk.clear();
@@ -315,7 +321,7 @@ namespace ec
 				case '=':
 					val.clear();
 					while ((c = pf->getc()) != EOF) {
-						if ('#' == c || ';' == c || '\n' == c || '\r' == c)
+						if (iscommentchar(c, commentchar) || '\n' == c || '\r' == c)
 							break;
 						if (!val.empty() || ('\x20' != c && '\t' != c))
 							val += c;
@@ -341,22 +347,22 @@ namespace ec
 
 		template<typename charT
 			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			bool scanstring(const charT* str, size_t zlen, std::function<int(const std::string &blk, const std::string &key, const std::string &val)>fun)
+			bool scanstring(const charT* str, size_t zlen, std::function<int(const std::string &blk, const std::string &key, const std::string &val)>fun, int commentchar = 0)
 		{
 			rstream_str fs(str, zlen);
 			if (!fs.available())
 				return false;
-			return scan(&fs, fun);
+			return scan(&fs, fun, commentchar);
 		}
 
 		template<typename charT
 			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			bool scanfile(const charT* sfile, std::function<int(const std::string &blk, const std::string &key, const std::string &val)>fun)
+			bool scanfile(const charT* sfile, std::function<int(const std::string &blk, const std::string &key, const std::string &val)>fun, int commentchar = 0)
 		{
 			rstream_file fs(sfile);
 			if (!fs.available())
 				return false;
-			return scan(&fs, fun);
+			return scan(&fs, fun, commentchar);
 		}
 	}// namespace cfg
 }; // ec

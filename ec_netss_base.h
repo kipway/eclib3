@@ -2,7 +2,7 @@
 \file ec_netsrv_base.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.5.6
+\update 2021.7.6
 
 session class for net::server.
 
@@ -86,6 +86,18 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #define EC_NET_CONOUTID 50  // connect out start id
 
 #define UCID_DYNAMIC_START 1000 // Dynamic start ID
+
+#ifndef EC_NET_SNDBUF_BLOCKSIZE
+#define EC_NET_SNDBUF_BLOCKSIZE (1024 * 32)
+#endif
+
+#ifndef EC_NET_SNDBUF_GLOBALSIZE
+#define EC_NET_SNDBUF_GLOBALSIZE (1024 * 1024 * 128)
+#endif
+
+#ifndef EC_NET_SNDBUF_NUMBLKS
+#define EC_NET_SNDBUF_NUMBLKS 1024
+#endif
 
 namespace ec
 {
@@ -191,12 +203,12 @@ namespace ec
 		public:
 			session& operator = (const session& v) = delete;
 			session(const session& v) = delete;
-			session(uint32_t listenid, uint32_t ucid, SOCKET  fd, uint32_t protoc, uint32_t status, memory* pmem, ilog* plog) :
+			session(uint32_t listenid, uint32_t ucid, SOCKET  fd, uint32_t protoc, uint32_t status, memory* pmem, ilog* plog, block_allocator* pblkallocator) :
 				_listenid(listenid), _protoc(protoc), _status(status), _fd(fd), _ucid(ucid)
 				, _timesndblcok(0), _time_err(0)
 				, _pause_r(0), _peerport(0), _pextdata(nullptr)
 				, _pssmem(pmem), _psslog(plog), _rbuf(pmem)
-				, _sndpos(0), _sbuf(pmem)
+				,_sndbuf(EC_NET_SNDBUF_NUMBLKS * pblkallocator->get_blksize(), pblkallocator)
 			{
 				_ip[0] = 0;
 				_timelastio = ::time(0);
@@ -206,7 +218,7 @@ namespace ec
 				, _timelastio(p->_timelastio), _timesndblcok(p->_timesndblcok), _time_err(p->_time_err)
 				, _pause_r(p->_pause_r), _peerport(p->_peerport), _timeconnect(p->_timeconnect), _pextdata(p->_pextdata)
 				, _pssmem(p->_pssmem), _psslog(p->_psslog), _rbuf(p->_pssmem)
-				, _sndpos(p->_sndpos), _sbuf(p->_pssmem)
+				, _sndbuf(std::move(p->_sndbuf))
 			{
 				memcpy(_ip, p->_ip, sizeof(_ip));
 				p->_fd = INVALID_SOCKET;//move
@@ -307,8 +319,7 @@ namespace ec
 			friend class EC_SS_EXTCLASS6;
 #endif
 		private:
-			size_t _sndpos;
-			bytes  _sbuf;
+			cycle_fifo _sndbuf;
 		public:
 			/*!
 			\brief do receive bytes
@@ -344,120 +355,56 @@ namespace ec
 			\param size [in] pdata size(bytes)
 			\return return -1:error ; >=0 the number of bytes actually sent, and the rest is added to the send buffer.
 			*/
-			int iosend(const void* pdata, size_t size)
+
+			int iosend(const void* pkg, size_t pkgsize)
 			{
-				int ns = 0;
-				_timelastio = ::time(0);
-				if (_sbuf.size() > 0) { // has data in buffer
-					if (_sndpos > _sbuf.size()) {
-						if (_psslog)
-							_psslog->add(CLOG_DEFAULT_ERR, "ucid(%u) buf error _sndpos=%zu, bufsize=%zu", _ucid, _sndpos, _sbuf.size());
+				if (_sndbuf.isnull()) //无缓存模式
+					return  send_non_block(_fd, (const uint8_t*)pkg, (int)pkgsize);
+				if (_sndbuf.empty()) {
+					int ns = send_non_block(_fd, pkg, (int)pkgsize);
+					if (ns < 0)
 						return -1;
-					}
-					if (_sbuf.size() + size - _sndpos > NET_SENDBUF_MAXSIZE + 1024) {
-						if (_psslog)
-							_psslog->add(CLOG_DEFAULT_ERR, "ucid(%u) buf oversize _sndpos=%zu, bufsize=%zu, addsize=%zu", _ucid, _sndpos, _sbuf.size(), size);
-						return -1;
-					}
-					try {
-						_sbuf.append(pdata, size);
-					}
-					catch (...) {
-						return -1;
-					}
-					return send_c();
+					return _sndbuf.append((const uint8_t*)pkg + ns, pkgsize - ns) ? (int)pkgsize : -1;
 				}
-				ns = send_non_block(_fd, pdata, (int)size);
-				if (ns > 0)
-					_timesndblcok = 0;
-				if (ns == (int)size || ns < 0)
-					return ns;
-				_sndpos = 0;
-				_sbuf.clear();
-				try {
-					_sbuf.append(((uint8_t*)pdata) + ns, size - ns); // add to buffer
-				}
-				catch (...) {
-					return -1;
-				}
-				if (ns == 0) { // do send overtime
-					if (!_timesndblcok)
-						_timesndblcok = _timelastio;
-					else if (::time(0) - _timesndblcok > EC_NET_SEND_BLOCK_OVERSECOND) {
-						if (_psslog)
-							_psslog->add(CLOG_DEFAULT_WRN, "ucid(%u) send block over %d seconds", _ucid, EC_NET_SEND_BLOCK_OVERSECOND);
-						return -1; //block 10 second
-					}
-				}
-				return ns;
+				return (!_sndbuf.append((const uint8_t*)pkg, pkgsize) || sendbuf() < 0) ? -1 : (int)pkgsize;
 			}
 
-			int flush_sendbuf() // return >=0:ok; -1:error
+			int  sendbuf() // return -1 error; >= 0 send size
 			{
-				if (!_sbuf.size() || _sndpos >= _sbuf.size())
+				if (_sndbuf.isnull() || _sndbuf.empty())
 					return 0;
-				int nsize = (int)(_sbuf.size() - _sndpos), ns = 0;
-				ns = tcpsend(_fd, _sbuf.data() + _sndpos, nsize, 2000);
-				if(ns > 0)
-					_sndpos += ns;
-				return (ns == nsize) ? ns : -1;
-			}
-
-			int send_c() // continue send form buf,return -1 error
-			{
-				int ns = 0;
-				if (!_sbuf.size())
-					return 0;
-				if (_sndpos == _sbuf.size()) {
-					_sndpos = 0;
-					_sbuf.clear();
-					_sbuf.shrink_to_fit();
-					return 0;
-				}
-				_timelastio = ::time(0);
-				if (_sndpos > _sbuf.size()) {
-					if (_psslog)
-						_psslog->add(CLOG_DEFAULT_ERR, "buf error ucid(%u) _sndpos=%zu,bufsize=%zu", _ucid, _sndpos, _sbuf.size());
-					return -1;
-				}
-				ns = send_non_block(_fd, _sbuf.data() + _sndpos, (int)(_sbuf.size() - _sndpos));
-				if (ns < 0) {
-					if (_psslog)
-						_psslog->add(CLOG_DEFAULT_DBG, "ucid(%u) send_c failed _sndpos=%zu,bufsize=%zu", _ucid, _sndpos, _sbuf.size());
-					return -1;
-				}
-				_sndpos += ns;
-				if (_sndpos == _sbuf.size()) {
-					_sndpos = 0;
-					_sbuf.clear();
-					_sbuf.shrink_to_fit();
-				}
-				if (ns > 0)
-					_timesndblcok = 0;
-				else if (ns == 0) { // do send overtime
-					if (!_timesndblcok)
-						_timesndblcok = _timelastio;
-					else if (::time(0) - _timesndblcok > EC_NET_SEND_BLOCK_OVERSECOND) {
-						if (_psslog)
-							_psslog->add(CLOG_DEFAULT_ERR, "ucid(%u) send block over %d seconds", _ucid, EC_NET_SEND_BLOCK_OVERSECOND);
-						return -1; //block 15 second
+				int nr = 0, ns;
+				ec::cycle_fifo::blk_* pblk = _sndbuf.top();
+				while (pblk) {
+					if (pblk->pos >= pblk->len) {
+						_sndbuf.pop();
+						pblk = _sndbuf.top();
+						continue;
 					}
+					ns = send_non_block(_fd, pblk->buf + pblk->pos,(int)(pblk->len - pblk->pos));
+					if (ns < 0)
+						return -1;
+					else if (!ns)
+						return nr;
+					nr += ns;
+					pblk->pos += ns;
+					if (pblk->pos < pblk->len)
+						break;
 				}
-				if (_psslog)
-					_psslog->add(CLOG_DEFAULT_DBG, "ucid(%u) send_c bytes %d, _sndpos=%zu,bufsize=%zu", _ucid, ns, _sndpos, _sbuf.size());
-				if (_sndpos > NET_SENDBUF_MAXSIZE / 4) {
-					_sbuf.erase(0, _sndpos);
-					_sndpos = 0;
-					_sbuf.shrink_to_fit();
-				}
-				return ns;
+				return nr;
 			}
 
 			inline size_t sndbufsize()// Returns the number of bytes in the send buffer
 			{
-				return _sbuf.size();
+				return _sndbuf.size();
 			}
-
+			inline size_t datablks()
+			{
+				return _sndbuf.blks();
+			}
+			bool sndbufempty() {
+				return _sndbuf.empty();
+			}
 			virtual void setip(const char* sip)
 			{
 				strlcpy(_ip, sip, sizeof(_ip));
@@ -470,8 +417,8 @@ namespace ec
 		class listen_session : public session
 		{
 		public:
-			listen_session(uint32_t ucid, SOCKET  fd, memory* pmem, ilog* plog) :
-				session(ucid, ucid, fd, EC_NET_SS_LISTEN, EC_NET_ST_WORK, pmem, plog)
+			listen_session(uint32_t ucid, SOCKET  fd, memory* pmem, ilog* plog, block_allocator* pblkallocator) :
+				session(ucid, ucid, fd, EC_NET_SS_LISTEN, EC_NET_ST_WORK, pmem, plog, pblkallocator)
 			{
 			}
 
@@ -489,8 +436,8 @@ namespace ec
 		class session_udpsrv : public session
 		{
 		public:
-			session_udpsrv(uint32_t ucid, SOCKET  fd, memory* pmem, ilog* plog) :
-				session(ucid, ucid, fd, EC_NET_SS_LISTEN, EC_NET_ST_PRE, pmem, plog)
+			session_udpsrv(uint32_t ucid, SOCKET  fd, memory* pmem, ilog* plog, block_allocator* pblkallocator) :
+				session(ucid, ucid, fd, EC_NET_SS_LISTEN, EC_NET_ST_PRE, pmem, plog, pblkallocator)
 			{
 			}
 		public:
