@@ -2,7 +2,7 @@
 \file ec_log.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.5.31
+\update 2021.7.28
 
 ilog
 	A client log base class
@@ -122,6 +122,8 @@ namespace ec
 
 			if (INVALID_SOCKET == _socket)
 				return -1;
+			int nval = 1024 * 1024;
+			setsockopt(_socket, SOL_SOCKET, SO_SNDBUF, (char*)&nval, (socklen_t)sizeof(nval));
 			return 0;
 		}
 		void close()
@@ -152,7 +154,11 @@ namespace ec
 			va_end(arg_ptr);
 			if (nb <= 0 || nb >= EC_LOG_FRM_SIZE)
 				return -1;
+#ifdef _WIN32
 			return ::sendto(_socket, buf, nh + nb, 0, (struct sockaddr *)&_srvaddr, sizeof(_srvaddr));
+#else
+			return ::sendto(_socket, buf, nh + nb, MSG_DONTWAIT, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
+#endif
 		}
 		virtual int getlevel()
 		{

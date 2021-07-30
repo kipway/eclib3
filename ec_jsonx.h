@@ -2,7 +2,7 @@
 \file ec_jsonx.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.6.11
+\update 2021.7.15
 
 json
 	a fast json parse class
@@ -21,6 +21,8 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #	define MAXSIZE_JSONX_KEY 63
 #endif
 #include "ec_text.h"
+#include "ec_time.h"
+#include "ec_base64.h"
 namespace ec
 {
 	class json // parse json object, fast no copy
@@ -345,6 +347,50 @@ namespace ec
 			}
 			return true;
 		}
+
+		template<typename _STR>
+		bool get_jb64(const char* key, _STR& val)
+		{
+			const ec::json::t_kv* pkv;
+			pkv = getkv(key);
+			val.clear();
+			if (!pkv || pkv->_v.empty())
+				return true;
+
+			ec::autobuf<> b64(modp_b64_decode_len(pkv->_v._size));
+			int nc = ec::decode_base64(b64.data(), pkv->_v._str, (int)pkv->_v._size);
+			if (nc < 0)
+				return false;
+			val.assign(b64.data(), nc);
+			return true;
+		}
+
+		template<typename _VAL>
+		void get_jipv4(const char* key, _VAL& hostv)
+		{
+			char sip[40] = { 0 };
+			hostv = 0;
+			if (!getstr(key, sip, sizeof(sip)))
+				return;
+			if (!sip[0])
+				return;
+#ifdef _WIN32
+			hostv = (_VAL)ntohl(inet_addr(sip));
+#else
+			hostv = (_VAL)inet_network(sip);
+#endif
+		}
+
+		template<typename _VAL>
+		void get_jtime(const char* key, _VAL& val)
+		{
+			const ec::json::t_kv* pkv;
+			pkv = getkv(key);
+			val = 0;
+			if (!pkv || pkv->_v.empty())
+				return;
+			val = (_VAL)ec::string2jstime(pkv->_v._str, pkv->_v._size);
+		}
 	private:
 		bool from_obj(txt &s)
 		{
@@ -638,6 +684,53 @@ namespace ec
 				++n;
 			}
 			sout.push_back(']');
+		}
+		template<typename _STROUT>
+		void out_jtime(int& nf, const char* key, int64_t val, _STROUT& sout)
+		{
+			if (!val)
+				return;
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			sout.append(key).append("\":\"");
+			jstime2localstring(val, sout);
+			sout.push_back('"');
+		}
+
+		template<typename _STROUT>
+		void out_jipv4(int& nf, const char* key, uint32_t hostv, _STROUT& sout)
+		{
+			if (!hostv)
+				return;
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			sout.append(key).append("\":\"");
+			char sip[80];
+			snprintf(sip, sizeof(sip), "%u.%u.%u.%u", hostv >> 24, (hostv >> 16) & 0xFF,
+				(hostv >> 8) & 0xFF, hostv & 0xFF);
+			sout.append(sip);
+			sout.push_back('"');
+		}
+
+		template<typename _STRVAL, typename _STROUT>
+		void out_jb64(int& nf, const char* key, const _STRVAL& val, _STROUT& sout)
+		{
+			if (val.empty())
+				return;
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			sout.append(key).append("\":\"");
+
+			ec::autobuf<> b64(modp_b64_encode_len(val.size()));//转换为base64;
+			int nc = ec::encode_base64(b64.data(), (const char*)val.data(), (int)val.size());
+			sout.append(b64.data(), nc);
+			sout.push_back('"');
 		}
 	}//js
 }// ec
