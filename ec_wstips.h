@@ -2,7 +2,7 @@
 \file ec_wstips.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2021.8.24
 
 functions used by websocket
 
@@ -137,7 +137,7 @@ namespace ec
 		size_t slen = sizes;
 		bytes tmp(pout->get_allocator());
 		tmp.reserve(2048 + sizes - sizes % 1024);
-		if (ncompress) {
+		if (ncompress && sizes >= 128) {
 			if (Z_OK != ws_encode_zlib(pdata, sizes, &tmp) || tmp.size() < 6)
 				return false;
 			pds = tmp.data() + 2;
@@ -145,11 +145,11 @@ namespace ec
 		}
 		size_t ss = 0, us;
 		pout->clear();
-		while (ss < slen) {
+		do {
 			uc = 0;
 			if (0 == ss) { //first frame
 				uc = 0x0F & wsopt;
-				if (ncompress)
+				if (ncompress && sizes >= 128)
 					uc |= 0x40;
 			}
 			us = EC_SIZE_WS_FRAME;
@@ -188,7 +188,7 @@ namespace ec
 			if (umask)
 				ec::xor_le(pout->data() + pout->getpos(), (int)us, umask);
 			ss += us;
-		}
+		}while (ss < slen);
 		return true;
 	}
 
@@ -203,9 +203,9 @@ namespace ec
 		unsigned char uc;
 		size_t ss = 0, us, fl;
 		pout->clear();
-		while (ss < slen) {
+		do{
 			uc = 0;
-			us = EC_SIZE_WS_FRAME;
+			us = ((sizes - ss) >= EC_SIZE_WS_FRAME) ? EC_SIZE_WS_FRAME : sizes - ss;
 
 			if (0 == ss)//first frame
 				uc = 0x0F & wsopt;
@@ -258,7 +258,7 @@ namespace ec
 			if (umask)
 				ec::xor_le(pout->data() + pout->getpos(), (int)fl, umask);
 			ss += us;
-		}
+		}while (ss < slen);
 		return true;
 	}
 }// ec

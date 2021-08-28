@@ -2,7 +2,7 @@
 \file ec_netsrv_ws.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.1.12
+\update 2021.8.24
 
 net server http/ws session class
 
@@ -49,8 +49,8 @@ namespace ec
 			bytes _wsmsg; // ws frame
 			int _comp;// compress flag
 			int _opcode;  // operate code
-			memory *_pwsmem;
-			ilog *_pwslog;
+			memory* _pwsmem;
+			ilog* _pwslog;
 		protected:
 			virtual int ws_iosend(const void* pdata, size_t size) = 0;
 			virtual void onupdatews() = 0;
@@ -77,7 +77,7 @@ namespace ec
 				return 0;
 			};
 
-			int ws_send(const void* pdata, size_t size) // return -1:error
+			int ws_send(const void* pdata, size_t size, int optcode = WS_OP_TXT) // return -1:error
 			{
 				if (!_nws)
 					return ws_iosend(pdata, size);
@@ -86,10 +86,10 @@ namespace ec
 					bytes vret(_pwsmem);
 					vret.reserve(1024 + size - size % 512);
 					if (_wscompress == ws_x_webkit_deflate_frame) { //deflate-frame
-						bsend = ws_make_perfrm(pdata, size, WS_OP_TXT, &vret);
+						bsend = ws_make_perfrm(pdata, size, optcode, &vret);
 					}
 					else { // ws_permessage_deflate
-						bsend = ws_make_permsg(pdata, size, WS_OP_TXT, &vret, size > 128 && _wscompress);
+						bsend = ws_make_permsg(pdata, size, optcode, &vret, size > 128 && _wscompress);
 					}
 					if (!bsend) {
 						if (_pwslog)
@@ -103,7 +103,7 @@ namespace ec
 				return -1;
 			}
 		private:
-			bool DoUpgradeWebSocket(const char *skey, ec::http::package* pPkg)
+			bool DoUpgradeWebSocket(const char* skey, ec::http::package* pPkg)
 			{
 				try {
 					if (_pwslog) {
@@ -129,7 +129,7 @@ namespace ec
 					vector<char> vret(_pwsmem);
 
 					vret.reserve(1024 * 4);
-					const char*sc = "HTTP/1.1 101 Switching Protocols\x0d\x0a"\
+					const char* sc = "HTTP/1.1 101 Switching Protocols\x0d\x0a"\
 						"Upgrade: websocket\x0d\x0a"\
 						"Connection: Upgrade\x0d\x0a";
 					vret.append(sc);
@@ -157,7 +157,7 @@ namespace ec
 								break;
 							}
 							else if (!ec::stricmp("x-webkit-deflate-frame", st)) {
-								vret.append("Sec-WebSocket-Extensions: x-webkit-deflate-frame; no_context_takeover\x0d\x0a", 2);
+								vret.append("Sec-WebSocket-Extensions: x-webkit-deflate-frame; no_context_takeover\x0d\x0a");
 								_wscompress = ws_x_webkit_deflate_frame;
 								break;
 							}
@@ -169,7 +169,7 @@ namespace ec
 					_txt.shrink_to_fit();
 					int ns = ws_send(vret.data(), vret.size());
 					if (_pwslog) {
-						for (auto &v : vret) {
+						for (auto& v : vret) {
 							if ('\r' == v)
 								v = '\x20';
 						}
@@ -200,7 +200,7 @@ namespace ec
 				_opcode = WS_OP_TXT;
 			}
 
-			int  ParseOneFrame(const char* stxt, size_t usize, int &fin)// reuturn >0 is do bytes
+			int  ParseOneFrame(const char* stxt, size_t usize, int& fin)// reuturn >0 is do bytes
 			{
 				int comp = 0;
 				fin = 0;
@@ -296,9 +296,9 @@ namespace ec
 			}
 
 			template<class _Out>
-			int WebsocketParse(const char* stxt, size_t usize, size_t &sizedo, _Out* pout)//support multi-frame
+			int WebsocketParse(const char* stxt, size_t usize, size_t& sizedo, _Out* pout)//support multi-frame
 			{
-				const char *pd = stxt;
+				const char* pd = stxt;
 				int ndo = 0, fin = 0;
 				sizedo = 0;
 				while (sizedo < usize) {
@@ -317,6 +317,17 @@ namespace ec
 						}
 						else
 							pout->append(_wsmsg.data(), _wsmsg.size());
+						if (WS_OP_PONG == _opcode) {
+							pout->clear();
+							reset_msg();
+							return he_waitdata;
+						}
+						else if (WS_OP_PING == _opcode) {
+							ws_send(pout->data(), pout->size(), WS_OP_PONG);
+							pout->clear();
+							reset_msg();
+							return he_waitdata;
+						}
 						reset_msg();
 						return he_ok;
 					}

@@ -2,13 +2,13 @@
 \file ec_wsclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.17
+\update 2021.8.25
 
 ws_c
 	class for websocket client
 	tcp_c -> ws_c
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2021, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -142,7 +142,7 @@ namespace ec
 		}
 
 		template<class _Out>
-		int doRequest(_Out& rin, _Out &pkg)
+		int doRequest(_Out& rin, _Out& pkg)
 		{
 			pkg.clear();
 			http::package htp;
@@ -174,11 +174,11 @@ namespace ec
 		}
 
 		template<class _Out>
-		int doWsData(_Out& rbuf, _Out* pmsgout)
+		int doWsData(_Out& rbuf, _Out* pmsgout, int* popcode = nullptr)
 		{
 			size_t sizedo = 0;
 			pmsgout->clear();
-			int nr = WebsocketParse((const char*)rbuf.data(), rbuf.size(), sizedo, pmsgout);//websocket
+			int nr = WebsocketParse((const char*)rbuf.data(), rbuf.size(), sizedo, pmsgout, popcode);//websocket
 			if (nr == he_failed) {
 				rbuf.clear();
 				return -1;
@@ -193,11 +193,11 @@ namespace ec
 		}
 
 		template<class _Out>
-		int makeWsPackage(const void* p, size_t size, _Out *pout)
+		int makeWsPackage(const void* p, size_t size, _Out* pout, int opcode = WS_OP_TXT)
 		{
 			if (_wscompress == ws_x_webkit_deflate_frame)  //deflate-frame
-				return ws_make_perfrm(p, size, WS_OP_TXT, pout, nextmask()) ? 0 : -1;
-			return  ws_make_permsg(p, size, WS_OP_TXT, pout, size > 128 && _wscompress, nextmask()) ? 0 : -1;// ws_permessage_deflate
+				return ws_make_perfrm(p, size, opcode, pout, nextmask()) ? 0 : -1;
+			return  ws_make_permsg(p, size, opcode, pout, size > 128 && _wscompress, nextmask()) ? 0 : -1;// ws_permessage_deflate
 		}
 
 	private:
@@ -208,7 +208,7 @@ namespace ec
 			_opcode = WS_OP_TXT;
 		}
 
-		int  ParseOneFrame(const char* stxt, size_t usize, int &fin)// reuturn >0 is do bytes
+		int  ParseOneFrame(const char* stxt, size_t usize, int& fin)// reuturn >0 is do bytes
 		{
 			int comp = 0;
 			fin = 0;
@@ -303,9 +303,9 @@ namespace ec
 			return (int)sizedo;
 		}
 		template<class _Out>
-		int WebsocketParse(const char* stxt, size_t usize, size_t &sizedo, _Out* pout)//support multi-frame
+		int WebsocketParse(const char* stxt, size_t usize, size_t& sizedo, _Out* pout, int* popcode = nullptr)//support multi-frame
 		{
-			const char *pd = stxt;
+			const char* pd = stxt;
 			int ndo = 0, fin = 0;
 			sizedo = 0;
 			while (sizedo < usize) {
@@ -324,6 +324,13 @@ namespace ec
 					}
 					else
 						pout->append((uint8_t*)_wsmsg.data(), _wsmsg.size());
+					if (WS_OP_PONG == _opcode) {
+						pout->clear();
+						reset_msg();
+						return he_waitdata;
+					}
+					if (popcode)
+						*popcode = _opcode;
 					reset_msg();
 					return he_ok;
 				}
@@ -401,7 +408,7 @@ namespace ec
 
 		virtual void onreadbytes(const uint8_t* p, int nbytes)
 		{
-			int nr = 0;
+			int nr = 0, nopcode = 0;
 			bytes pkg(_pmem);
 			pkg.reserve(1024 * 16);
 			_rbuf.append(p, nbytes);
@@ -419,16 +426,22 @@ namespace ec
 					return;
 			}
 			pkg.clear();
-			nr = _ws.doWsData(_rbuf, &pkg);
+			nr = _ws.doWsData(_rbuf, &pkg, &nopcode);
 			if (nr < 0) {
 				close();
 				_nstatus = 0;
 				return;
 			}
 			while (pkg.size()) {
-				onwsdata(pkg.data(), (int)pkg.size());
+				if (WS_OP_PING == nopcode) {
+					if (sendwsbytes(pkg.data(), (int)pkg.size(), WS_OP_PONG) < 0)
+						return;
+				}
+				else
+					onwsdata(pkg.data(), (int)pkg.size());
 				pkg.clear();
-				nr = _ws.doWsData(_rbuf, &pkg);
+				nopcode = 0;
+				nr = _ws.doWsData(_rbuf, &pkg, &nopcode);
 				if (nr < 0) {
 					close();
 					_nstatus = 0;
@@ -436,6 +449,17 @@ namespace ec
 				}
 			}
 			_rbuf.reserve(1024 * 32);
+		}
+
+		int sendwsbytes(const void* p, int nlen, int opcode)
+		{
+			bytes vs(_pmem);
+			vs.reserve(1024 + nlen - nlen % 512);
+			if (_ws.makeWsPackage(p, nlen, &vs, opcode) < 0) {
+				close();
+				return -1;
+			}
+			return tcp_c::sendbytes(vs.data(), (int)vs.size());
 		}
 	};//ws_c
 }//ec

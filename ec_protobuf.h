@@ -2,7 +2,7 @@
 \file ec_protobuf.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.5.6
+\update 2021.8.3
 
 classes to encode/decode google protocol buffer,support proto3
 
@@ -75,6 +75,8 @@ namespace ec
 
 		bool isutf8(const char* s, size_t size = 0) const // return true if s is utf8
 		{
+			if (!s)
+				return true;
 			uint8_t c;
 			int nb = 0;
 			const char* pend = s + (size ? size : strlen(s));
@@ -83,16 +85,18 @@ namespace ec
 				if (!nb) {
 					if (!(c & 0x80))
 						continue;
-					if (c >= 0xFC && c <= 0xFD)
+					if (0xc0 == c || 0xc1 == c || c > 0xF4) // RFC 3629
+						return false;
+					if((c & 0xFC) == 0xFC) // 1111 1100
 						nb = 5;
-					else if (c >= 0xF8)
+					else if ((c & 0xF8) == 0xF8) // 1111 1000
 						nb = 4;
-					else if (c >= 0xF0)
+					else if ((c & 0xF0) == 0xF0) // 1111 0000
 						nb = 3;
-					else if (c >= 0xE0)
+					else if ((c & 0xE0) == 0xE0) // 1110 1000
 						nb = 2;
-					//else if (c >= 0xC0) // GBK -> UTF8  > 2bytes
-					//	nb = 1;
+					else if( (c & 0xC0) == 0xC0) // 1100 0000
+						nb = 1;
 					else
 						return false;
 					continue;

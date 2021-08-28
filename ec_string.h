@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.5.5
+\update 2021.8.3
 
 string , bytes and string functions
 
@@ -724,6 +724,12 @@ namespace ec
 	{ //case insensitive equal. return true: equal; false not equal
 		if (!s1 || !s2)
 			return false;
+#ifdef _WIN32
+			return (stricmp(s1, s2) == 0);
+#else
+			return (strcasecmp(s1, s2) == 0);
+#endif
+		/*
 		while (*s1 && *s2) {
 			if (*s1 != *s2 && tolower(*s1) != tolower(*s2))
 				return false;
@@ -731,6 +737,7 @@ namespace ec
 			++s2;
 		}
 		return *s1 == '\0' && *s2 == '\0';
+		*/
 	}
 
 	template<typename charT>
@@ -984,16 +991,18 @@ namespace ec
 			if (!nb) {
 				if (!(c & 0x80))
 					continue;
-				if (c >= 0xFC && c <= 0xFD)
+				if (0xc0 == c || 0xc1 == c || c > 0xF4) // RFC 3629
+					return false;
+				if ((c & 0xFC) == 0xFC) // 1111 1100
 					nb = 5;
-				else if (c >= 0xF8)
+				else if ((c & 0xF8) == 0xF8) // 1111 1000
 					nb = 4;
-				else if (c >= 0xF0)
+				else if ((c & 0xF0) == 0xF0) // 1111 0000
 					nb = 3;
-				else if (c >= 0xE0)
+				else if ((c & 0xE0) == 0xE0) // 1110 1000
 					nb = 2;
-				//else if (c >= 0xC0) // GBK -> UTF8  > 2bytes
-				//nb = 1;
+				else if ((c & 0xC0) == 0xC0) // 1100 0000
+					nb = 1;
 				else
 					return false;
 				continue;

@@ -2,13 +2,13 @@
 \file ec_wssclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2021.8.25
 
 wss_c
 	a Client websocket class based on HTTPS (TLS1.2)
 	tcp_c -> tls_c -> wss_c
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2021, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -79,8 +79,8 @@ namespace ec
 
 		virtual void ontlsdata(const uint8_t* p, int nbytes)
 		{
-			int nr = 0;
-			bytes pkg( _pmem);
+			int nr = 0, nopcode = 0;
+			bytes pkg(_pmem);
 			pkg.reserve(1024 * 16);
 			_rbuf.append(p, nbytes);
 			if (!_nstatus) {
@@ -97,16 +97,22 @@ namespace ec
 					return;
 			}
 			pkg.clear();
-			nr = _ws.doWsData(_rbuf, &pkg);
+			nr = _ws.doWsData(_rbuf, &pkg, &nopcode);
 			if (nr < 0) {
 				close();
 				_nstatus = 0;
 				return;
 			}
 			while (pkg.size()) {
-				onwsdata(pkg.data(), (int)pkg.size());
+				if (WS_OP_PING == nopcode) {
+					if (sendwsbytes(pkg.data(), (int)pkg.size(), WS_OP_PONG) < 0)
+						return;
+				}
+				else
+					onwsdata(pkg.data(), (int)pkg.size());
 				pkg.clear();
-				nr = _ws.doWsData(_rbuf, &pkg);
+				nopcode = 0;
+				nr = _ws.doWsData(_rbuf, &pkg, &nopcode);
 				if (nr < 0) {
 					close();
 					_nstatus = 0;
@@ -114,6 +120,17 @@ namespace ec
 				}
 			}
 			_rbuf.shrink_to_fit();
+		}
+
+		int sendwsbytes(const void* p, int nlen, int opcode)
+		{
+			bytes vs(_pmem);
+			vs.reserve(1024 + nlen - nlen % 512);
+			if (_ws.makeWsPackage(p, nlen, &vs, opcode) < 0) {
+				close();
+				return -1;
+			}
+			return tls_c::sendbytes(vs.data(), (int)vs.size());
 		}
 	};
 }

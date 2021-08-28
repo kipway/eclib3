@@ -2,11 +2,11 @@
 \file ec_config.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.7.5
+\update 2021.8.18
 
-namespace cfg 
+namespace cfg
 	tools for ini, config file.
-namespace csv 
+namespace csv
 	tools csv file.
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
@@ -72,7 +72,7 @@ namespace ec
 	class rstream_file // read only file stream
 	{
 	public:
-		rstream_file(const char *sfilename) :_pf(nullptr) {
+		rstream_file(const char* sfilename) :_pf(nullptr) {
 			if (!sfilename || !*sfilename)
 				return;
 			_pf = fopen(sfilename, "rt");
@@ -108,7 +108,7 @@ namespace ec
 	namespace csv
 	{
 		template<class rstream>
-		int scan(rstream *pf, std::function<int(int nrow, int ncol, const char* stxt, bool bendline)>fun)
+		int scan(rstream* pf, std::function<int(int nrow, int ncol, const char* stxt, bool bendline)>fun)
 		{ // fun return 0: continue; Non-zero: stop scan
 			if (!pf)
 				return -1;
@@ -160,40 +160,32 @@ namespace ec
 						stmp[np++] = c;
 				}
 			}
-			if (nerr && np > 0) {
+			if (!nerr && np > 0) {
 				stmp[np] = 0;
 				nerr = fun(nr, nc, stmp, false);
 			}
 			return nerr;
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			int scanstring(const charT* str, size_t strsize, std::function<int(int nrow, int ncol, const char* stxt, bool bendline)>fun)
+		inline int scanstring(const char* str, size_t strsize, std::function<int(int nrow, int ncol, const char* stxt, bool bendline)>fun)
 		{
 			rstream_str fs(str, strsize);
-			if (!fs.available())
-				return -1;
-			return scan(&fs, fun);
+			return !fs.available() ? -1 : scan(&fs, fun);
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			int scanfile(const charT* sfile, std::function<int(int nrow, int ncol, const char* stxt, bool bendline)>fun)
+		inline int scanfile(const char* sfile, std::function<int(int nrow, int ncol, const char* stxt, bool bendline)>fun)
 		{
 			rstream_file fs(sfile);
-			if (!fs.available())
-				return -1;
-			return scan(&fs, fun);
+			return !fs.available() ? -1 : scan(&fs, fun);
 		}
 	} //namespace csv
 
 	namespace cfg
 	{
 		template <class rstream, class _Str>
-		bool setval(rstream *pf,
-			std::function<int(const std::string &blk, const std::string &key, std::string &newv)>fun,
-			_Str &so)
+		bool setval(rstream* pf,
+			std::function<int(const std::string& blk, const std::string& key, std::string& newv)>fun,
+			_Str& so)
 		{ // fun return Non-zero replace
 			so.clear();
 			so.reserve(1024 * 8);
@@ -259,8 +251,8 @@ namespace ec
 
 		template <class _Str>
 		bool setval(const char* sfile,
-			std::function<int(const std::string &blk, const std::string &key, std::string &newv)>fun,
-			_Str &so)
+			std::function<int(const std::string& blk, const std::string& key, std::string& newv)>fun,
+			_Str& so)
 		{
 			rstream_file fs(sfile);
 			if (!fs.available())
@@ -269,9 +261,9 @@ namespace ec
 		}
 
 		template <class _Str>
-		bool setval(const _Str &instr,
-			std::function<int(const std::string &blk, const std::string &key, std::string &newv)>fun,
-			_Str &so)
+		bool setval(const _Str& instr,
+			std::function<int(const std::string& blk, const std::string& key, std::string& newv)>fun,
+			_Str& so)
 		{
 			rstream_str fs(instr.data(), instr.size());
 			if (!fs.available())
@@ -282,7 +274,7 @@ namespace ec
 			return ('#' == c || ';' == c) && (0 == commentchar || c == commentchar);
 		}
 		template<class rstream>
-		bool scan(rstream *pf, std::function<int(const std::string &blk, const std::string &key, const std::string &val)>fun, int commentchar = 0)
+		bool scan(rstream* pf, std::function<int(const std::string& blk, const std::string& key, const std::string& val)>fun, int commentchar = 0)
 		{ // fun return 0: continue; Non-zero: stop scan
 			if (!pf)
 				return false;
@@ -345,24 +337,16 @@ namespace ec
 			return true;
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			bool scanstring(const charT* str, size_t zlen, std::function<int(const std::string &blk, const std::string &key, const std::string &val)>fun, int commentchar = 0)
+		inline bool scanstring(const char* str, size_t zlen, std::function<int(const std::string& blk, const std::string& key, const std::string& val)>fun, int commentchar = 0)
 		{
 			rstream_str fs(str, zlen);
-			if (!fs.available())
-				return false;
-			return scan(&fs, fun, commentchar);
+			return !fs.available() ? false : scan(&fs, fun, commentchar);
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			bool scanfile(const charT* sfile, std::function<int(const std::string &blk, const std::string &key, const std::string &val)>fun, int commentchar = 0)
+		inline bool scanfile(const char* sfile, std::function<int(const std::string& blk, const std::string& key, const std::string& val)>fun, int commentchar = 0)
 		{
 			rstream_file fs(sfile);
-			if (!fs.available())
-				return false;
-			return scan(&fs, fun, commentchar);
+			return !fs.available() ? false : scan(&fs, fun, commentchar);
 		}
 	}// namespace cfg
 }; // ec

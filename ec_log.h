@@ -2,7 +2,7 @@
 \file ec_log.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.7.28
+\update 2021.8.5
 
 ilog
 	A client log base class
@@ -13,7 +13,7 @@ udplog
 prtlog
 	a client log class, print logs to terminal
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2021, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -65,21 +65,27 @@ namespace ec
 			const char* s;
 		};
 	public:
-		static const char* level_str(int n)
+		static const char* level_str(int n, char* sout = nullptr, size_t soutsize = 0)
 		{
 			for (size_t i = 0; i < sizeof(loglevitems) / sizeof(t_loglevel); i++) {
 				if (loglevitems[i].v == n)
 					return loglevitems[i].s;
 			}
-			return "ndf"; // not define
+			if (!sout || !soutsize)
+				return "ndf"; // not define
+			snprintf(sout, soutsize, "%d", n);
+			return sout;
 		}
 		static int  level_val(const char* s)
 		{
+			if (!s || !*s)
+				return CLOG_DEFAULT_MSG;
 			for (size_t i = 0; i < sizeof(loglevitems) / sizeof(t_loglevel); i++) {
 				if (ec::strieq(loglevitems[i].s, s))
 					return loglevitems[i].v;
 			}
-			return CLOG_DEFAULT_MSG;
+			int n = atoi(s);
+			return n ? n : CLOG_DEFAULT_MSG;
 		}
 	};
 
