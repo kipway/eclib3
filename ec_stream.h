@@ -2,7 +2,7 @@
 \file ec_stream.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.15
+\update 2021.1.15
 
 stream
 	memery stream class
@@ -17,6 +17,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #pragma once
 #include <stdint.h>
 #include <memory.h>
+#include <type_traits>
 namespace ec
 {
 	/*!
@@ -141,6 +142,8 @@ namespace ec
 
 		stream & write(const void* pbuf, size_t size)
 		{
+			if(!pbuf || !size)
+				return *this;
 			if (_pos + size > _size)
 				throw (int)1;
 			memcpy(_ps + _pos, pbuf, size);
@@ -167,6 +170,8 @@ namespace ec
 
 		stream & writestr(const char* pbuf)
 		{
+			if (!pbuf || !*pbuf)
+				return *this;
 			size_t n = 0;
 			if (pbuf)
 				n = strlen(pbuf);

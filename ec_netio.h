@@ -2,7 +2,7 @@
 \file ec_netio.h
 \author	jiangyong
 \email  kipway@outlook.com
-update 2020.11.3
+update 2022.3.9
 
 functions for NET IO
 
@@ -539,14 +539,14 @@ namespace ec
 		/*!
 		parse url
 		demo:
-		udp://0.0.0.0:999
+		udp://0.0.0.0:999/path?level=dbg
 		*/
 		class url
 		{
 		public:
 			url() :_port(0) {
 			}
-			bool parse(const char *surl, size_t urlsize)
+			bool parse(const char* surl, size_t urlsize)
 			{
 				ec::strargs ss;
 				ec::strsplit(":/", surl, urlsize, ss, 4);
@@ -555,6 +555,7 @@ namespace ec
 				_protocol.clear();
 				_ip.clear();
 				_path.clear();
+				_args.clear();
 
 				_protocol.append(ss[0]._str, ss[0]._size);
 
@@ -577,7 +578,11 @@ namespace ec
 					_port = 0;
 					_path.append(ss[2]._str, urlsize);
 				}
-
+				size_t apos = _path.find_first_of('?');
+				if (std::string::npos != apos) {
+					_args.append(_path.c_str() + apos + 1);
+					_path.resize(apos);
+				}
 				return true;
 			}
 		public:
@@ -585,6 +590,7 @@ namespace ec
 			std::string _protocol;
 			std::string _ip;
 			std::string _path;
+			std::string _args;
 		};
 	}//net
 }// ec

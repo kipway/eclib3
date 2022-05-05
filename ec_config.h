@@ -2,7 +2,7 @@
 \file ec_config.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.8.18
+\update 2021.10.12
 
 namespace cfg
 	tools for ini, config file.
@@ -26,6 +26,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include <stdlib.h>
 #include <string.h>
 #include <string>
+#include "ec_string.h"
 namespace ec
 {
 	class rstream_str // read only string stream
@@ -75,7 +76,14 @@ namespace ec
 		rstream_file(const char* sfilename) :_pf(nullptr) {
 			if (!sfilename || !*sfilename)
 				return;
-			_pf = fopen(sfilename, "rt");
+#ifdef _WIN32
+			UINT codepage = ec::strisutf8(sfilename) ? CP_UTF8 : CP_ACP;
+			wchar_t sfile[_MAX_PATH];
+			sfile[0] = 0;
+			_pf = MultiByteToWideChar(codepage, 0, sfilename, -1, sfile, sizeof(sfile) / sizeof(wchar_t)) ? _wfopen(sfile, L"rt") : nullptr;
+#else
+			_pf = ::fopen(sfilename, "rt");
+#endif
 		}
 		~rstream_file() {
 			if (_pf) {
@@ -162,7 +170,7 @@ namespace ec
 			}
 			if (!nerr && np > 0) {
 				stmp[np] = 0;
-				nerr = fun(nr, nc, stmp, false);
+				nerr = fun(nr, nc, stmp, true);
 			}
 			return nerr;
 		}

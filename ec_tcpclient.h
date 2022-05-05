@@ -2,7 +2,7 @@
 \file ec_tcpclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.11.23
+\update 2022.2.26
 
 tcp_c
 	a class for tcp client, support socks5 proxy, asynchronous connection
@@ -113,12 +113,14 @@ namespace ec
 				if (WSAEWOULDBLOCK != WSAGetLastError()) {
 					::closesocket(_sock);
 					_sock = INVALID_SOCKET;
+					connectfailed();
 					return false;
 				}
 #else
 				if (EINPROGRESS != errno) {
 					::closesocket(_sock);
 					_sock = INVALID_SOCKET;
+					connectfailed();
 					return false;
 				}
 #endif

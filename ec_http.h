@@ -2,7 +2,7 @@
 \file ec_http.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.19
+\update 2021.4.21
 
 classes for HTTP protocol parse
 
@@ -36,11 +36,11 @@ namespace ec
 		he_failed
 	};
 
-	constexpr const char* http_sret404 = "http/1.1 404  not found!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:60\r\n\r\n"\
+	constexpr const char* http_sret404 = "HTTP/1.0 404  not found!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:60\r\n\r\n"\
 		"<!DOCTYPE html><html><body><p>404 not fund</p></body></html>";
-	constexpr const char* http_sret400 = "http/1.1 400  Bad Request!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:63\r\n\r\n"\
+	constexpr const char* http_sret400 = "HTTP/1.0 400  Bad Request!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:63\r\n\r\n"\
 		"<!DOCTYPE html><html><body><p>400 Bad Request</p></body></html>";
-	constexpr const char* http_sret413 = "http/1.1 413  Payload Too Large!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:76\r\n\r\n"\
+	constexpr const char* http_sret413 = "HTTP/1.0 413  Payload Too Large!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:76\r\n\r\n"\
 		"<!DOCTYPE html><html><body><p>413 Request Entity Too Large</p></body></html>";
 
 	/*!
@@ -463,7 +463,7 @@ namespace ec
 				ctxt _s(sl, size);
 				if (!_s.get2sp(&_method))
 					return e_method;
-				if (_method.ieq("HTTP/1.1")) { // response
+				if (_method.ieq("HTTP/1.1") || _method.ieq("HTTP/1.0")) { // response
 					_s.skip();
 					if (!_s.get2sp(&_url)) // code
 						return e_url;
@@ -477,8 +477,8 @@ namespace ec
 				if (!_s.get2sp(&_url))
 					return e_url;
 				_s.skip();
-				if (!_s.get2sp(&_ver) || !_ver.ieq("http/1.1")) {
-					if (_ver.empty() && _url.ieq("http/1.1"))
+				if (!_s.get2sp(&_ver) || (!_ver.ieq("http/1.1") && !_ver.ieq("http/1.0"))) {
+					if (_ver.empty() && (_url.ieq("http/1.1") || _url.ieq("http/1.0")))
 						return e_url;
 					return e_ver;
 				}
@@ -691,7 +691,7 @@ namespace ec
 
 			template<class _Out>
 			int decode_body(const void *pSrc, size_t size_src, _Out* pout, bool gzip = false)
-			{
+			{ //return 0:OK; 
 				z_stream stream;
 				int err;
 				char outbuf[32 * 1024];
@@ -707,11 +707,11 @@ namespace ec
 				if (err != Z_OK)
 					return err;
 				uLong uout = 0;
-				while (stream.avail_in > 0) {
+				while (!err && stream.avail_in > 0) {
 					stream.next_out = (unsigned char*)outbuf;
 					stream.avail_out = (unsigned int)sizeof(outbuf);
 					err = inflate(&stream, Z_SYNC_FLUSH);
-					if (err != Z_OK)
+					if (Z_OK != err && Z_STREAM_END != err)
 						break;
 					try {
 						pout->append(outbuf, stream.total_out - uout);
@@ -723,7 +723,7 @@ namespace ec
 					uout += stream.total_out - uout;
 				}
 				inflateEnd(&stream);
-				return err;
+				return err == Z_STREAM_END ? 0 : err;
 			}
 
 			template<class _Out>

@@ -2,7 +2,7 @@
 \file ec_wstips.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.8.24
+\update 2022.4.26
 
 functions used by websocket
 
@@ -110,11 +110,11 @@ namespace ec
 		if (err != Z_OK)
 			return err;
 		uLong uout = 0;
-		while (stream.avail_in > 0) {
+		while (!err && stream.avail_in > 0) {
 			stream.next_out = (unsigned char*)outbuf;
 			stream.avail_out = (unsigned int)sizeof(outbuf);
 			err = inflate(&stream, Z_SYNC_FLUSH);
-			if (err != Z_OK)
+			if (Z_OK != err && Z_STREAM_END != err)
 				break;
 			try {
 				pout->append(outbuf, stream.total_out - uout);
@@ -126,7 +126,7 @@ namespace ec
 			uout += stream.total_out - uout;
 		}
 		inflateEnd(&stream);
-		return err;
+		return err == Z_STREAM_END ? 0 : err;
 	}
 
 	template <class _Out>

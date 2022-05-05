@@ -2,12 +2,12 @@
 \file ec_ipcwrk.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.5
+\update 2022.5.2
 
 net::ipcwrk
 	a base class for AF_UNIX IPC worker
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,15 +32,26 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #	include <fcntl.h>
 #endif
 
+#if defined(_MEM_TINY) // < 256M
+#define SIZE_IPRCV_BUF (1024 * 256)
+#define SIZE_IPSND_BUF (1024 * 512)
+#elif defined(_MEM_SML) // < 1G
+#define SIZE_IPRCV_BUF (1024 * 512)
+#define SIZE_IPSND_BUF (1024 * 1024)
+#else
+#define SIZE_IPRCV_BUF (1024 * 1024)
+#define SIZE_IPSND_BUF (1024 * 1024 * 2)
+#endif
 #include "ec_log.h"
 namespace ec {
 	class ipcwrk
 	{
 	public:
 		ipcwrk() : _nst(st_unkown)
-			, _sizercvbuf(1024 * 1024)
-			, _sizesndbuf(1024 * 1024 * 4)
+			, _sizercvbuf(SIZE_IPRCV_BUF)
+			, _sizesndbuf(SIZE_IPSND_BUF)
 			, _timeconnect(0)
+			, _timeclose(0)
 		{
 			_pollfd.events = 0;
 			_pollfd.revents = 0;
@@ -70,7 +81,7 @@ namespace ec {
 	private:
 		pollfd _pollfd;
 		time_t _timeconnect;
-
+		time_t _timeclose;// for delay reconnect
 	protected:
 		virtual void ondisconnect() = 0;
 		virtual void onconnect() = 0;
@@ -82,7 +93,8 @@ namespace ec {
 		bool connectasyn() {
 			if (_pollfd.fd != INVALID_SOCKET)
 				return true;
-
+			if (::time(nullptr) - _timeclose < 2) // reconnect delay 2 seconds
+				return false;
 #ifdef USE_AFUNIX
 			struct sockaddr_un srvaddr;
 			memset(&srvaddr, 0, sizeof(srvaddr));
@@ -137,22 +149,32 @@ namespace ec {
 
 		void closefd(bool bnotify = true)
 		{
-			if (_pollfd.fd != INVALID_SOCKET)
-				closesocket(_pollfd.fd);
+			if (_pollfd.fd != INVALID_SOCKET) {
+#ifdef _WIN32
+				shutdown(_pollfd.fd, SD_BOTH);
+				::closesocket(_pollfd.fd);
+#else
+				shutdown(_pollfd.fd, SHUT_RDWR);
+				::close(_pollfd.fd);
+#endif
+			}
 			_pollfd.fd = INVALID_SOCKET;
 			_pollfd.events = 0;
 			_pollfd.revents = 0;
 			_nst = st_unkown;
 			if (bnotify)
 				ondisconnect();
+			_timeclose = ::time(nullptr);
 		}
 	public:
-		bool init(const char* url, int sizercvbuf, int sizesndbuf)
+		bool init(const char* url, int sizercvbuf = 0, int sizesndbuf = 0)
 		{
 			if (!_url.parse(url, strlen(url)))
 				return false;
-			_sizercvbuf = sizercvbuf;
-			_sizesndbuf = sizesndbuf;
+			if(sizercvbuf)
+				_sizercvbuf = sizercvbuf;
+			if(sizesndbuf)
+				_sizesndbuf = sizesndbuf;
 			return _url._port != 0 && !_url._protocol.empty();
 		}
 
@@ -160,7 +182,7 @@ namespace ec {
 		{
 			if (st_unkown == _nst)
 				return -1;
-			int nr = net::send_non_block(_pollfd.fd, p, (int)nsize);
+			int nr = net::_send_non_block(_pollfd.fd, (const char*)p, (int)nsize);
 			if (nr < 0)
 				closefd();
 			return nr;

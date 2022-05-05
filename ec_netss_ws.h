@@ -2,7 +2,7 @@
 \file ec_netsrv_ws.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.8.24
+\update 2022.4.7
 
 net server http/ws session class
 
@@ -89,7 +89,7 @@ namespace ec
 						bsend = ws_make_perfrm(pdata, size, optcode, &vret);
 					}
 					else { // ws_permessage_deflate
-						bsend = ws_make_permsg(pdata, size, optcode, &vret, size > 128 && _wscompress);
+						bsend = ws_make_permsg(pdata, size, optcode, &vret, (size > 128 && _wscompress) ? 1 : 0);
 					}
 					if (!bsend) {
 						if (_pwslog)
@@ -326,6 +326,10 @@ namespace ec
 							ws_send(pout->data(), pout->size(), WS_OP_PONG);
 							pout->clear();
 							reset_msg();
+							return he_waitdata;
+						}
+						else if (WS_OP_CLOSE == _opcode || pout->empty()) {
+							pout->clear();
 							return he_waitdata;
 						}
 						reset_msg();

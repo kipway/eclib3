@@ -2,7 +2,7 @@
 \file ec_diskio.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.26
+\update 2021.9.29
 
 io
 	tools for disk IO，use utf-8 parameters
@@ -53,11 +53,12 @@ namespace ec
 			FILE *fopen(const charT* utf8file, const charT* utf8mode)
 		{
 #ifdef _WIN32
+			UINT codepage = ec::strisutf8(utf8file) ? CP_UTF8 : CP_ACP;
 			wchar_t sfile[512], smode[32];
 			sfile[0] = 0;
 			smode[0] = 0;
-			if (!MultiByteToWideChar(CP_UTF8, 0, utf8file, -1, sfile, sizeof(sfile) / sizeof(wchar_t))
-				|| !MultiByteToWideChar(CP_UTF8, 0, utf8mode, -1, smode, sizeof(smode) / sizeof(wchar_t))
+			if (!MultiByteToWideChar(codepage, 0, utf8file, -1, sfile, sizeof(sfile) / sizeof(wchar_t))
+				|| !MultiByteToWideChar(codepage, 0, utf8mode, -1, smode, sizeof(smode) / sizeof(wchar_t))
 				)
 				return nullptr;
 			return _wfopen(sfile, smode);
@@ -73,7 +74,7 @@ namespace ec
 #ifdef _WIN32
 			wchar_t sfile[512];
 			sfile[0] = 0;
-			if (!MultiByteToWideChar(CP_UTF8, 0, utf8filename, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
+			if (!MultiByteToWideChar(ec::strisutf8(utf8filename) ? CP_UTF8 : CP_ACP, 0, utf8filename, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
 				return -1;
 			return ::_wremove(sfile);
 #else
@@ -88,7 +89,7 @@ namespace ec
 		{
 			wchar_t sfile[512];
 			sfile[0] = 0;
-			if (!MultiByteToWideChar(CP_UTF8, 0, utf8filename, -1, sfile, sizeof(sfile) / sizeof(wchar_t))
+			if (!MultiByteToWideChar(ec::strisutf8(utf8filename) ? CP_UTF8 : CP_ACP, 0, utf8filename, -1, sfile, sizeof(sfile) / sizeof(wchar_t))
 				|| _waccess(sfile, 0))
 				return false;
 			return true;
@@ -98,6 +99,7 @@ namespace ec
 			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
 			bool createdir(const charT* utf8path)
 		{
+			UINT codepage = ec::strisutf8(utf8path) ? CP_UTF8 : CP_ACP;
 			int i = 0;
 			char szt[512];
 			wchar_t sdir[512];
@@ -109,7 +111,7 @@ namespace ec
 				if (szt[i] == '/') {
 					szt[i] = '\0';
 					if (!exist(szt)) {
-						if (!MultiByteToWideChar(CP_UTF8, 0, szt, -1, sdir, sizeof(sdir) / sizeof(wchar_t))
+						if (!MultiByteToWideChar(codepage, 0, szt, -1, sdir, sizeof(sdir) / sizeof(wchar_t))
 							|| !CreateDirectoryW(sdir, NULL))
 							return false;
 					}
@@ -121,7 +123,7 @@ namespace ec
 			if (i && szt[i] != '/') {
 				szt[i] = '\0';
 				if (!exist(szt)) {
-					if (!MultiByteToWideChar(CP_UTF8, 0, szt, -1, sdir, sizeof(sdir) / sizeof(wchar_t))
+					if (!MultiByteToWideChar(codepage, 0, szt, -1, sdir, sizeof(sdir) / sizeof(wchar_t))
 						|| !CreateDirectoryW(sdir, NULL))
 						return false;
 				}
@@ -134,7 +136,7 @@ namespace ec
 			long long getdiskspace(const charT* utf8path) // lpszDisk format is "c:\"
 		{
 			wchar_t wpath[512];
-			if (!MultiByteToWideChar(CP_UTF8, 0, utf8path, -1, wpath, sizeof(wpath) / sizeof(wchar_t)))
+			if (!MultiByteToWideChar(ec::strisutf8(utf8path) ? CP_UTF8 : CP_ACP, 0, utf8path, -1, wpath, sizeof(wpath) / sizeof(wchar_t)))
 				return 0;
 			ULARGE_INTEGER ullFreeBytesAvailable, ullTotalNumberOfBytes, ullTotalNumberOfFreeBytes;
 			ullFreeBytesAvailable.QuadPart = 0;
@@ -158,7 +160,7 @@ namespace ec
 			bool filestat(const charT* utf8file, t_stat *pout)
 		{
 			wchar_t wfile[512];
-			if (!MultiByteToWideChar(CP_UTF8, 0, utf8file, -1, wfile, sizeof(wfile) / sizeof(wchar_t)))
+			if (!MultiByteToWideChar(ec::strisutf8(utf8file) ? CP_UTF8 : CP_ACP, 0, utf8file, -1, wfile, sizeof(wfile) / sizeof(wchar_t)))
 				return false;
 			struct __stat64 statbuf;
 			if (!_wstat64(wfile, &statbuf)) {
@@ -226,7 +228,7 @@ namespace ec
 			long long filesize(const charT* utf8file)
 		{
 			wchar_t wsfile[512];
-			if (!MultiByteToWideChar(CP_UTF8, 0, utf8file, -1, wsfile, sizeof(wsfile) / sizeof(wchar_t)))
+			if (!MultiByteToWideChar(ec::strisutf8(utf8file) ? CP_UTF8 : CP_ACP, 0, utf8file, -1, wsfile, sizeof(wsfile) / sizeof(wchar_t)))
 				return -1;
 			struct __stat64 statbuf;
 			if (!_wstat64(wsfile, &statbuf))
@@ -244,7 +246,7 @@ namespace ec
 			}
 
 			wchar_t sfile[512];
-			if (!MultiByteToWideChar(CP_UTF8, 0, utf8file, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
+			if (!MultiByteToWideChar(ec::strisutf8(utf8file) ? CP_UTF8 : CP_ACP, 0, utf8file, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
 				return false;
 
 			HANDLE hFile = CreateFileW(sfile, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING
@@ -500,7 +502,7 @@ namespace ec
 			if (snprintf(szFilter, sizeof(szFilter), "%s*.*", utf8path) < 0)
 				return;
 			wchar_t sfile[512];
-			if (MultiByteToWideChar(CP_UTF8, 0, szFilter, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
+			if (MultiByteToWideChar(ec::strisutf8(szFilter) ? CP_UTF8 : CP_ACP, 0, szFilter, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
 				hFind = FindFirstFileW(sfile, &FindFileData);
 #else
 			dir = opendir(utf8path);

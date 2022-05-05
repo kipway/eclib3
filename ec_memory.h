@@ -676,7 +676,7 @@ namespace ec {
 		}
 
 		inline bool empty() {
-			return _head == _tail;
+			return _head == _tail || nullptr == _pbuf ;
 		}
 
 		blk_* top() // get at head

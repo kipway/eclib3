@@ -233,6 +233,26 @@ namespace ec
 				memcpy(_master_key, p->_master_key, sizeof(_master_key));
 				memcpy(_key_block, p->_key_block, sizeof(_key_block));
 			}
+
+			session(session&& v) : _pmem(v._pmem), _plog(v._plog), _ucid(v._ucid), _bserver(v._bserver), _breadcipher(v._breadcipher),
+				_bsendcipher(v._bsendcipher), _seqno_send(v._seqno_send), _seqno_read(v._seqno_read), _cipher_suite(v._cipher_suite),
+				_pkgtcp(std::move(v._pkgtcp)), _bhandshake_finished(v._bhandshake_finished)
+			{
+				memcpy(_keyblock, v._keyblock, sizeof(_keyblock));
+				memcpy(_key_cwmac, v._key_cwmac, sizeof(_key_cwmac));
+				memcpy(_key_swmac, v._key_swmac, sizeof(_key_swmac));
+				memcpy(_key_cw, v._key_cw, sizeof(_key_cw));
+				memcpy(_key_sw, v._key_sw, sizeof(_key_sw));
+
+				_hmsg = v._hmsg;
+				v._hmsg = nullptr; //move
+
+				memcpy(_serverrand, v._serverrand, sizeof(_serverrand));
+				memcpy(_clientrand, v._clientrand, sizeof(_clientrand));
+				memcpy(_master_key, v._master_key, sizeof(_master_key));
+				memcpy(_key_block, v._key_block, sizeof(_key_block));
+			}
+
 			virtual ~session()
 			{
 				if (_hmsg) {
@@ -246,6 +266,9 @@ namespace ec
 			}
 			inline memory* getpmem() {
 				return _pmem;
+			}
+			inline void appendreadbytes(const void* pdata, size_t size) {
+				_pkgtcp.append(pdata, size);
 			}
 		protected:
 			memory * _pmem;
@@ -1040,6 +1063,18 @@ namespace ec
 				_pkgm.reserve(TLS_REC_BUF_SIZE);
 				_pkgm.append(p->_pkgm.data(), p->_pkgm.size());
 			}
+			sessionserver(sessionserver&& v) : session(std::move(v)), _pkgm(std::move(v._pkgm))
+			{
+				_pRsaLck = v._pRsaLck;
+				_pRsaPrivate = v._pRsaPrivate;
+
+				_pcer = v._pcer;
+				_cerlen = v._cerlen;
+				_pcerroot = v._pcerroot;
+				_cerrootlen = v._cerrootlen;
+				memcpy(_sip, v._sip, sizeof(_sip));
+			}
+
 			virtual ~sessionserver()
 			{
 			}

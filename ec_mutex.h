@@ -2,7 +2,7 @@
 \file ec_mutex.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.15
+\update 2022.4.26
 
 class unique_lock;
 class spinlock;
@@ -105,6 +105,26 @@ namespace ec {
 				_plck->lock();
 		}
 		~unique_spinlock()
+		{
+			if (_plck)
+				_plck->unlock();
+		}
+	};
+
+	template<class LOCK>
+	class safe_lock {
+	private:
+		LOCK* _plck;
+	public:
+		safe_lock(const LOCK&) = delete;
+		LOCK& operator = (const LOCK&) = delete;
+
+		safe_lock(LOCK* plck) : _plck(plck)
+		{
+			if (_plck)
+				_plck->lock();
+		}
+		~safe_lock()
 		{
 			if (_plck)
 				_plck->unlock();

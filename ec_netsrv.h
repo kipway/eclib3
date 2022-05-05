@@ -67,7 +67,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #endif
 
 #ifndef SIZE_WIN_NOFILE_LIMT  // windows max number of FD
-#define SIZE_WIN_NOFILE_LIMT 50000
+#define SIZE_WIN_NOFILE_LIMT 16384
 #endif
 
 #ifdef USE_AF_WIN
@@ -116,6 +116,7 @@ namespace ec
 			uint32_t _unextsrvid; // next Unique serial number
 			time_t _time_lastrun;
 			int   _pauseread; // 1: pause read ;0 : read
+			size_t _pkgflag_size; // message flag length
 		protected:
 			block_allocator _sndbufblks;
 			hashmap<uint32_t, t_ssbufsize> _mapbufsize;// send buffer block size map
@@ -135,6 +136,7 @@ namespace ec
 				, _nerr_emfile_count(0)
 				, _unextid(UCID_DYNAMIC_START)
 				, _unextsrvid(0)
+				, _pkgflag_size(3)
 				, _sndbufblks(EC_NET_SNDBUF_BLOCKSIZE, EC_NET_SNDBUF_GLOBALSIZE / EC_NET_SNDBUF_BLOCKSIZE)
 				, _udpbuf(pmem)
 			{
@@ -144,6 +146,12 @@ namespace ec
 				memset(_sucidfile, 0, sizeof(_sucidfile));
 				_pauseread = 0;
 				_udpbuf.reserve(1024 * 64);
+			}
+			size_t get_pkgflag_size() {
+				return _pkgflag_size;
+			}
+			void set_pkgflag_size(size_t size) {
+				_pkgflag_size = size;
 			}
 			void set_ucidfile(const char* sfile)
 			{
@@ -1322,7 +1330,7 @@ namespace ec
 
 			int update_basetcp(uint32_t ucid, PNETSS *pi, const uint8_t* pu, size_t size) //base TCP protocol. return -2:not support; -1 :error ; 0:no; 1:ok
 			{
-				if (size < 3)
+				if (size < _pkgflag_size)
 					return 0;
 #ifdef _LOG_PROTOCOL_UPDATE
 				if (_plog) {
@@ -1356,7 +1364,8 @@ namespace ec
 #if (0 != ECNETSRV_WS)
 				if (hasprotocol((*pi)->_listenid, EC_NET_SS_WS)
 					&& (ec::strineq("head", (const char*)pu, 4)
-						|| ec::strineq("get", (const char*)pu, 3))
+						|| ec::strineq("get", (const char*)pu, 3)
+						|| ec::strineq("post", (const char*)pu, 4))
 					) { //update http
 					ec::http::package r;
 					if (r.parse((const char*)pu, size) < 0)
@@ -1378,7 +1387,7 @@ namespace ec
 #if (0 != ECNETSRV_TLS)
 			int update_basetls(uint32_t ucid, PNETSS* pi, const uint8_t* pu, size_t size) //update base TLS protocol. return -1 :error ; 0:no; 1:ok
 			{
-				if (size < 3)
+				if (size < _pkgflag_size)
 					return 0;
 #ifdef _LOG_PROTOCOL_UPDATE
 				if (_plog) {
@@ -1392,7 +1401,8 @@ namespace ec
 #if (0 != ECNETSRV_WSS)
 				if (hasprotocol((*pi)->_listenid, EC_NET_SS_WSS)
 					&& (ec::strineq("head", (const char*)pu, 4)
-						|| ec::strineq("get", (const char*)pu, 3))
+						|| ec::strineq("get", (const char*)pu, 3)
+						|| ec::strineq("post", (const char*)pu, 4))
 					) { //update https
 					ec::http::package r;
 					if (r.parse((const char*)pu, size) < 0)

@@ -2,7 +2,7 @@
 \file ec_hashmap.h
 \author jiangyong
 \email  kipway@outlook.com
-\update 2020.10.28
+\update 2022.4.23
 
 hashmap
 	A hash map class, incompatible with std::unordered_map.
@@ -17,7 +17,8 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 
 #pragma once
 #include <functional>
-#include "ec_memory.h"
+#include <memory.h>
+#include "ec_alloctor.h"
 #include "ec_hash.h"
 
 namespace ec
@@ -98,15 +99,11 @@ namespace ec
 		t_node**	_ppv;
 		size_type   _uhashsize;
 		size_type   _usize;
-		memory*		_pmem;
+		blk_alloctor<>* _pmem;
 	private:
 		t_node* new_node()
 		{
-			t_node* pnode = nullptr;
-			if (_pmem)
-				pnode = (t_node*)_pmem->mem_malloc(sizeof(t_node));
-			else
-				pnode = (t_node*)malloc(sizeof(t_node));
+			t_node* pnode = (t_node*)_pmem->malloc_(sizeof(t_node), nullptr);
 			if (pnode)
 				new(&pnode->value)value_type();
 			return pnode;
@@ -118,11 +115,16 @@ namespace ec
 			_DelVal()(p->value);
 			if (std::is_class<_Ty>::value)
 				p->value.~value_type();
-			if (_pmem)
-				_pmem->mem_free(p);
-			else
-				free(p);
+			_pmem->free_(p);
 		}
+
+		void del_node(t_node* p)
+		{
+			if (!p)
+				return;
+			_pmem->free_(p);
+		}
+
 	public:
 		hashmap(const hashmap&) = delete;
 		hashmap& operator = (const hashmap&) = delete;
@@ -132,7 +134,7 @@ namespace ec
 			, _uhashsize(uhashsize)
 			, _usize(0)
 		{
-			_pmem = new ec::memory(size_node(), uhashsize * 2);
+			_pmem = new blk_alloctor<>(size_node(), uhashsize / 2 < 32 ? 32 : uhashsize / 2);
 			_ppv = new t_node*[_uhashsize];
 			if (nullptr == _ppv)
 				return;
@@ -296,6 +298,27 @@ namespace ec
 				if (_Keyeq()(key, pNode->value)) {
 					*ppNodePrev = pNode->pNext;
 					free_node(pNode);
+					_usize--;
+					return true;
+				}
+				ppNodePrev = &pNode->pNext;
+			}
+			return false;
+		}
+
+		bool erase(key_type key, std::function<void(value_type &val)>ondel) noexcept
+		{
+			if (nullptr == _ppv || !_usize)
+				return false;
+			size_type upos = _Hasher()(key) % _uhashsize;
+			t_node** ppNodePrev;
+			ppNodePrev = &_ppv[upos];
+			t_node* pNode;
+			for (pNode = *ppNodePrev; pNode != nullptr; pNode = pNode->pNext) {
+				if (_Keyeq()(key, pNode->value)) {
+					*ppNodePrev = pNode->pNext;
+					ondel(pNode->value);
+					del_node(pNode);
 					_usize--;
 					return true;
 				}

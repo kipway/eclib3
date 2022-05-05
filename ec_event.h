@@ -2,12 +2,12 @@
 \file ec_event.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2022.5.3
 
 cEvent
 	event class use c++11 condition_variable
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,16 +25,18 @@ namespace ec {
 		cEvent(bool bInitiallyOwn = false, bool bManualReset = false) :_nready(bInitiallyOwn), _bManualReset(bManualReset)
 		{
 		}
-		bool SetEvent()
-		{			
-			_mtx.lock();
+		bool SetEvent(bool ball = false)
+		{
+			std::unique_lock<std::mutex> lck(_mtx);
 			_nready = true;
-			_mtx.unlock();
-			_cv.notify_one();
+			if (ball)
+				_cv.notify_all();
+			else
+				_cv.notify_one();
 			return true;
 		};
 		bool ResetEvent()
-		{			
+		{
 			_mtx.lock();
 			_nready = false;
 			_mtx.unlock();

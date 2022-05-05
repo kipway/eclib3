@@ -2,7 +2,7 @@
 \file ec_log.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.8.5
+\update 2022.3.9
 
 ilog
 	A client log base class
@@ -13,7 +13,7 @@ udplog
 prtlog
 	a client log class, print logs to terminal
 
-eclib 3.0 Copyright (c) 2017-2021, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,13 +27,14 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #define CLOG_DEFAULT_MSG  30
 #define CLOG_DEFAULT_MOR  31
 #define CLOG_DEFAULT_DBG  40
+#define CLOG_DEFAULT_ALL  999
 
 #include "ec_netio.h"
 #include "ec_time.h"
 #include "ec_string.h"
 
 #define EC_LOG_FRM_SIZE (1024 * 60) // MAX size of one log string
-namespace ec 
+namespace ec
 {
 	static const struct t_loglevel {
 		int v;
@@ -43,6 +44,7 @@ namespace ec
 	, {CLOG_DEFAULT_MSG, "msg"}
 	, {CLOG_DEFAULT_MOR, "mor"}
 	, {CLOG_DEFAULT_DBG, "dbg"}
+	, {CLOG_DEFAULT_ALL, "all"}
 	};
 
 	class ilog // log base class
@@ -52,13 +54,19 @@ namespace ec
 		}
 		virtual int open(const char* args) = 0; // return -1:error; 0:success
 #ifdef _WIN32
-		virtual int add(int level, const char * format, ...) = 0; //return >= 0 out string length; -1:error;
+		virtual int add(int level, const char* format, ...) = 0; //return >= 0 out string length; -1:error;
 #else
-		virtual int add(int level, const char * format, ...) __attribute__((format(printf, 3, 4))) = 0; //return >= 0 out string length; -1:error;
+		virtual int add(int level, const char* format, ...) __attribute__((format(printf, 3, 4))) = 0; //return >= 0 out string length; -1:error;
+#endif
+#ifdef _WIN32
+		virtual int append(int level, const char* format, ...) = 0; //return >= 0 out string length; -1:error;
+#else
+		virtual int append(int level, const char* format, ...) __attribute__((format(printf, 3, 4))) = 0; //return >= 0 out string length; -1:error;
 #endif
 		virtual int getlevel() = 0;
 		virtual void setlevel(int lev) = 0;
 		virtual void runtime() = 0;
+		virtual void release() = 0;
 	private:
 		struct t_logi {
 			int v;
@@ -87,6 +95,7 @@ namespace ec
 			int n = atoi(s);
 			return n ? n : CLOG_DEFAULT_MSG;
 		}
+		static ilog* create(const char* surl);
 	};
 
 	class udplog :public ilog // log class write to UDP server
@@ -102,28 +111,44 @@ namespace ec
 				_socket = INVALID_SOCKET;
 			}
 		}
-		int open(const char* str) // "udp://127.0.0.1:999/cabin"
+		int open(const char* str) // "udp://127.0.0.1:999/cabin?level=dbg"
 		{
 			if (!str || !*str)
 				return -1;
-			size_t pos = 0, zl = strlen(str);
-			char sprotocol[8] = { 0 }, sip[40] = { 0 }, sport[8] = { 0 }, scabin[80] = { 0 };
-			if (!ec::strnext(":/", str, zl, pos, sprotocol, sizeof(sprotocol))
-				|| !ec::strnext(":/", str, zl, pos, sip, sizeof(sip))
-				|| !ec::strnext("/", str, zl, pos, sport, sizeof(sport))
-				|| !ec::strnext('\n', str, zl, pos, scabin, sizeof(scabin))
-				)
+			std::string strurl;
+			strurl.reserve(strlen(str) + 1);
+			while (*str) { // remove space and table char
+				if (*str != '\x20' && *str != '\t')
+					strurl.push_back(*str);
+				str++;
+			}
+			ec::net::url purl;
+			if (!purl.parse(strurl.c_str(), strurl.size()))
 				return -1;
-			_cabin.assign(scabin);
-			uint16_t uport = (uint16_t)atoi(sport);
+			if (purl._path.empty())
+				return -1;
+			if (!purl._port)
+				purl._port = 999; //default
+			_cabin.assign(purl._path.c_str());
+
+			if (!purl._args.empty()) { // parse url args
+				size_t pos = 0;
+				char skey[16] = { 0 }, sval[16] = { 0 };
+				if (ec::strnext('=', purl._args.c_str(), purl._args.size(), pos, skey, sizeof(skey))
+					&& ec::strnext('&', purl._args.c_str(), purl._args.size(), pos, sval, sizeof(sval))
+					) {
+					if (ec::strieq("level", skey))
+						_level = ec::ilog::level_val(sval);
+				}
+			}
 			if (_socket != INVALID_SOCKET) {
 				::closesocket(_socket);
 				_socket = INVALID_SOCKET;
 			}
 			memset(&_srvaddr, 0, sizeof(_srvaddr));
 			_srvaddr.sin_family = AF_INET;
-			_srvaddr.sin_addr.s_addr = inet_addr(sip);
-			_srvaddr.sin_port = htons(uport);
+			_srvaddr.sin_addr.s_addr = inet_addr(purl._ip.c_str());
+			_srvaddr.sin_port = htons(purl._port);
 			_socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
 			if (INVALID_SOCKET == _socket)
@@ -141,9 +166,9 @@ namespace ec
 		}
 	public:
 #ifdef _WIN32
-		virtual int add(int level, const char * format, ...)
+		virtual int add(int level, const char* format, ...)
 #else
-		virtual int add(int level, const char * format, ...) __attribute__((format(printf, 3, 4)))
+		virtual int add(int level, const char* format, ...) __attribute__((format(printf, 3, 4)))
 #endif
 		{
 			if (INVALID_SOCKET == _socket)
@@ -161,7 +186,33 @@ namespace ec
 			if (nb <= 0 || nb >= EC_LOG_FRM_SIZE)
 				return -1;
 #ifdef _WIN32
-			return ::sendto(_socket, buf, nh + nb, 0, (struct sockaddr *)&_srvaddr, sizeof(_srvaddr));
+			return ::sendto(_socket, buf, nh + nb, 0, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
+#else
+			return ::sendto(_socket, buf, nh + nb, MSG_DONTWAIT, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
+#endif
+		}
+#ifdef _WIN32
+		virtual int append(int level, const char* format, ...)
+#else
+		virtual int append(int level, const char* format, ...) __attribute__((format(printf, 3, 4)))
+#endif
+		{
+			if (INVALID_SOCKET == _socket)
+				return -1;
+			if (_level < level)
+				return 0;
+			char buf[EC_LOG_FRM_SIZE + 80];
+			int nh = snprintf(buf, sizeof(buf), "{\"order\":\"append\",\"level\":%d,\"cabin\":\"%s\"}\n", level, _cabin.c_str());
+			if (nh < 0)
+				return -1;
+			va_list arg_ptr;
+			va_start(arg_ptr, format);
+			int nb = vsnprintf(&buf[nh], EC_LOG_FRM_SIZE, format, arg_ptr);
+			va_end(arg_ptr);
+			if (nb <= 0 || nb >= EC_LOG_FRM_SIZE)
+				return -1;
+#ifdef _WIN32
+			return ::sendto(_socket, buf, nh + nb, 0, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
 #else
 			return ::sendto(_socket, buf, nh + nb, MSG_DONTWAIT, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
 #endif
@@ -176,6 +227,10 @@ namespace ec
 		}
 		virtual void runtime()
 		{
+		}
+		virtual void release()
+		{
+			delete this;
 		}
 	protected:
 		int _level;
@@ -195,19 +250,19 @@ namespace ec
 			return 0;
 		}
 #ifdef _WIN32
-		virtual int add(int level, const char * format, ...)
+		virtual int add(int level, const char* format, ...)
 #else
-		virtual int add(int level, const char * format, ...) __attribute__((format(printf, 3, 4)))
+		virtual int add(int level, const char* format, ...) __attribute__((format(printf, 3, 4)))
 #endif
 		{
 			if (_level < level)
 				return 0;
 			int ns = 0;
 			ec::cTime ctm(ec::nstime(&ns));
-
+			char slev[16] = { 0 };
 			printf("[%d/%d/%d %02d:%02d:%02d.%06d] [%s] "
 				, ctm._year, ctm._mon, ctm._day, ctm._hour, ctm._min, ctm._sec, ns
-				, ec::ilog::level_str(level));
+				, ec::ilog::level_str(level, slev, sizeof(slev)));
 
 			va_list arg_ptr;
 			va_start(arg_ptr, format);
@@ -215,6 +270,20 @@ namespace ec
 			va_end(arg_ptr);
 
 			printf("\n");
+			return n;
+		}
+#ifdef _WIN32
+		virtual int append(int level, const char* format, ...)
+#else
+		virtual int append(int level, const char* format, ...) __attribute__((format(printf, 3, 4)))
+#endif
+		{
+			if (_level < level)
+				return 0;
+			va_list arg_ptr;
+			va_start(arg_ptr, format);
+			int n = vprintf(format, arg_ptr);
+			va_end(arg_ptr);
 			return n;
 		}
 		virtual int getlevel()
@@ -228,7 +297,27 @@ namespace ec
 		virtual void runtime()
 		{
 		}
+		virtual void release()
+		{
+			delete this;
+		}
 	protected:
 		int _level;
 	};
+
+	inline ilog* ilog::create(const char* surl)
+	{
+		size_t pos = 0, zl = (surl && *surl) ? strlen(surl) : 0;
+		char sprotocol[16] = { 0 };
+		if (!ec::strnext(":/", surl, zl, pos, sprotocol, sizeof(sprotocol)))
+			sprotocol[0] = 0;
+		if (ec::strieq("udp", sprotocol)) {
+			udplog* plog = new udplog();
+			plog->open(surl);
+			return plog;
+		}
+		prtlog* plog = new prtlog();
+		plog->open(surl);
+		return plog;
+	}
 } // namespace ec

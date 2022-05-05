@@ -1,7 +1,7 @@
 /*!
 \file ec_file.h
 \author	kipway@outlook.com
-\update 2020.12.2
+\update 2021.9.29
 
 eclib file class
 
@@ -63,7 +63,8 @@ namespace ec
 			OF_SYNC = 0x08,        // wirte througt
 			OF_TRUNC = 0x10,       // create file,if exits create it
 			OF_SHARE_READ = 0x20,  // only for windows,other open handle can read
-			OF_SHARE_WRITE = 0x40  // only for windows,other open handle can write
+			OF_SHARE_WRITE = 0x40,  // only for windows,other open handle can write
+			OF_APPEND_DATA = 0X80
 		};
 		enum SeekPosition { seek_set = 0, seek_cur = 1, seek_end = 2 };
 	protected:
@@ -134,9 +135,11 @@ namespace ec
 			else
 				dwCreateFlag = OPEN_EXISTING;
 
-			unsigned int dwFlags = 0;
+			unsigned int dwFlags = FILE_ATTRIBUTE_NORMAL;
 			if (nOpenFlags & OF_SYNC)
-				dwFlags = FILE_FLAG_WRITE_THROUGH;
+				dwFlags |= FILE_FLAG_WRITE_THROUGH;
+			if (nOpenFlags & OF_APPEND_DATA)
+				dwAccess = FILE_APPEND_DATA | SYNCHRONIZE;
 			HANDLE hFile = ::CreateFileW(sfile, dwAccess, dwShareMode, &sa,
 				dwCreateFlag, dwFlags, NULL);
 
@@ -171,7 +174,7 @@ namespace ec
 		};
 
 		///\breif return number of readbytes or -1 with error
-		int Read(void *buf, unsigned int ucount)
+		int Read(void* buf, unsigned int ucount)
 		{
 			if (m_hFile == INVALID_HANDLE_VALUE)
 				return -1;
@@ -182,7 +185,7 @@ namespace ec
 		}
 
 		///\breif return number of writebytes or -1 with error
-		int Write(const void *buf, unsigned int ucount)
+		int Write(const void* buf, unsigned int ucount)
 		{
 			if (m_hFile == INVALID_HANDLE_VALUE)
 				return -1;
@@ -284,12 +287,13 @@ namespace ec
 			if (nOpenFlags & OF_SYNC)
 				dwFlag = O_SYNC | O_RSYNC;
 
-			// 创建文件
+			if (nOpenFlags & OF_APPEND_DATA)
+				oflags |= O_WRONLY | O_APPEND;
+
 			int hFile = ::open64(sfile, oflags, S_IROTH | S_IXOTH | S_IRWXU | S_IRWXG | dwFlag);//must add S_IRWXG usergroup can R&W
 
 			if (hFile == INVALID_HANDLE_VALUE)
 				return false;
-
 			m_hFile = hFile;
 			return true;
 		};
@@ -310,7 +314,7 @@ namespace ec
 		};
 
 		///\breif return number of readbytes or -1 with error
-		int Read(void *buf, unsigned int ucount)
+		int Read(void* buf, unsigned int ucount)
 		{
 			if (m_hFile == INVALID_HANDLE_VALUE)
 				return -1;
@@ -319,7 +323,7 @@ namespace ec
 		}
 
 		///\breif return number of writebytes or -1 with error
-		int Write(const void *buf, unsigned int ucount)
+		int Write(const void* buf, unsigned int ucount)
 		{
 			if (m_hFile == INVALID_HANDLE_VALUE)
 				return -1;
@@ -367,13 +371,13 @@ namespace ec
 			return 0;
 		}
 #endif
-		inline int ReadFrom(long long loff, void *buf, unsigned int ucount)
+		inline int ReadFrom(long long loff, void* buf, unsigned int ucount)
 		{
 			if (Seek(loff, seek_set) < 0)
 				return -1;
 			return Read(buf, ucount);
 		};
-		inline int WriteTo(long long loff, const void *buf, unsigned int ucount)
+		inline int WriteTo(long long loff, const void* buf, unsigned int ucount)
 		{
 			if (Seek(loff, seek_set) < 0)
 				return -1;

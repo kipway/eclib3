@@ -2,7 +2,7 @@
 \file ec_jsonx.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.7.15
+\update 2022.2.8
 
 json
 	a fast json parse class
@@ -616,6 +616,30 @@ namespace ec
 			sout.push_back('"');
 		}
 
+		template<typename _STROUT>
+		void out_jstring(int& nf, const char* key, const char* val, size_t sizeval, _STROUT& sout)
+		{
+			if (!val || !sizeval || !*val)
+				return;
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			sout.append(key).append("\":\"");
+			if (!ec::jstr_needesc(val, sizeval)) {
+				sout.append(val, sizeval).push_back('"');
+				return;
+			}
+
+			const char* s = val, * se = s + sizeval;
+			while (s < se) {
+				if (*s == '\\' || *s == '\"')
+					sout += '\\';
+				sout += *s++;
+			}
+			sout.push_back('"');
+		}
+
 		template<typename _VAL, typename _STROUT>
 		void out_jnumber(int &nf, const char* key, _VAL val, _STROUT & sout)
 		{
@@ -661,7 +685,9 @@ namespace ec
 			for (auto &obj : vals) {
 				if (n)
 					sout.push_back(',');
+				sout.push_back('"');
 				ec::out_jstr(obj.data(), obj.size(), sout);
+				sout.push_back('"');
 				++n;
 			}
 			sout.push_back(']');
