@@ -2,7 +2,7 @@
 \file ec_log.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.3.9
+\update 2022.9.20
 
 ilog
 	A client log base class
@@ -29,6 +29,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #define CLOG_DEFAULT_DBG  40
 #define CLOG_DEFAULT_ALL  999
 
+#define CLOG_DEFAULT_INF CLOG_DEFAULT_MSG
 #include "ec_netio.h"
 #include "ec_time.h"
 #include "ec_string.h"
@@ -41,6 +42,7 @@ namespace ec
 		const char* s;
 	} loglevitems[] = { {CLOG_DEFAULT_ERR, "err"}
 	, {CLOG_DEFAULT_WRN, "wrn"}
+	, {CLOG_DEFAULT_INF, "inf"}
 	, {CLOG_DEFAULT_MSG, "msg"}
 	, {CLOG_DEFAULT_MOR, "mor"}
 	, {CLOG_DEFAULT_DBG, "dbg"}
@@ -63,6 +65,9 @@ namespace ec
 #else
 		virtual int append(int level, const char* format, ...) __attribute__((format(printf, 3, 4))) = 0; //return >= 0 out string length; -1:error;
 #endif
+		virtual int push(int level, const char* subwho, const char* format, va_list args) {
+			return 0;
+		};
 		virtual int getlevel() = 0;
 		virtual void setlevel(int lev) = 0;
 		virtual void runtime() = 0;
@@ -191,6 +196,29 @@ namespace ec
 			return ::sendto(_socket, buf, nh + nb, MSG_DONTWAIT, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
 #endif
 		}
+
+		virtual int push(int level, const char* subwho, const char* format, va_list args) {
+
+			if (INVALID_SOCKET == _socket)
+				return -1;
+			if (_level < level)
+				return 0;
+			char buf[EC_LOG_FRM_SIZE + 80];
+			int nh = (subwho && *subwho) ?
+				snprintf(buf, sizeof(buf), "{\"order\":\"wlog\",\"level\":%d,\"cabin\":\"%s\"}\n[%s]", level, _cabin.c_str(), subwho) :
+				snprintf(buf, sizeof(buf), "{\"order\":\"wlog\",\"level\":%d,\"cabin\":\"%s\"}\n", level, _cabin.c_str());
+			if (nh < 0)
+				return -1;
+			int nb = vsnprintf(&buf[nh], EC_LOG_FRM_SIZE, format, args);
+			if (nb <= 0 || nb >= EC_LOG_FRM_SIZE)
+				return -1;
+#ifdef _WIN32
+			return ::sendto(_socket, buf, nh + nb, 0, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
+#else
+			return ::sendto(_socket, buf, nh + nb, MSG_DONTWAIT, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
+#endif
+		}
+
 #ifdef _WIN32
 		virtual int append(int level, const char* format, ...)
 #else
@@ -242,11 +270,24 @@ namespace ec
 	class prtlog : public ec::ilog // log print to current terminal
 	{
 	public:
-		prtlog(int nlev = CLOG_DEFAULT_DBG) :_level(nlev)
+		enum out_type{
+			out_null = 0, // out to null
+			out_std = 1 // out to stdout
+		};
+		prtlog(int nlev = CLOG_DEFAULT_DBG) :_level(nlev), _outtype(out_null)
 		{
 		}
+		//args: nullptr or "null" prt to null; "stdout" prt to stdout
 		virtual int open(const char* args)
 		{
+			if (args && *args) {
+				if (ec::strieq("stdout", args))
+					_outtype = out_std;
+				else
+					_outtype = out_null;
+			}
+			else
+				_outtype = out_std;
 			return 0;
 		}
 #ifdef _WIN32
@@ -255,7 +296,7 @@ namespace ec
 		virtual int add(int level, const char* format, ...) __attribute__((format(printf, 3, 4)))
 #endif
 		{
-			if (_level < level)
+			if (_outtype == out_null || _level < level)
 				return 0;
 			int ns = 0;
 			ec::cTime ctm(ec::nstime(&ns));
@@ -272,13 +313,32 @@ namespace ec
 			printf("\n");
 			return n;
 		}
+		virtual int push(int level, const char* subwho, const char* format, va_list args) {
+			if (_outtype == out_null || _level < level)
+				return 0;
+			int ns = 0;
+			ec::cTime ctm(ec::nstime(&ns));
+			char slev[16] = { 0 };
+			(subwho && *subwho) ?
+				printf("[%d/%d/%d %02d:%02d:%02d.%06d] [%s][%s] "
+					, ctm._year, ctm._mon, ctm._day, ctm._hour, ctm._min, ctm._sec, ns
+					, ec::ilog::level_str(level, slev, sizeof(slev)), subwho) :
+				printf("[%d/%d/%d %02d:%02d:%02d.%06d] [%s] "
+					, ctm._year, ctm._mon, ctm._day, ctm._hour, ctm._min, ctm._sec, ns
+					, ec::ilog::level_str(level, slev, sizeof(slev)));
+
+			int n = vprintf(format, args);
+			printf("\n");
+			fflush(stdout);
+			return n;
+		}
 #ifdef _WIN32
 		virtual int append(int level, const char* format, ...)
 #else
 		virtual int append(int level, const char* format, ...) __attribute__((format(printf, 3, 4)))
 #endif
 		{
-			if (_level < level)
+			if (_outtype == out_null || _level < level)
 				return 0;
 			va_list arg_ptr;
 			va_start(arg_ptr, format);
@@ -303,6 +363,7 @@ namespace ec
 		}
 	protected:
 		int _level;
+		out_type _outtype;
 	};
 
 	inline ilog* ilog::create(const char* surl)

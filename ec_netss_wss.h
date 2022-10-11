@@ -2,7 +2,7 @@
 \file ec_netsrv_wss.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.19
+\update 2022.8.4
 
 net::session_wss
 	websocket over HTTPS(TLS1.2) session
@@ -31,10 +31,10 @@ namespace ec
 			/*!
 			\brief construct for update session
 			*/
-			session_wss(session_tls* ps, const uint8_t* pu, size_t size) : session_tls(ps), base_ws(ps)
+			session_wss(session_tls&& ss) : session_tls(std::move(ss)),
+				base_ws(session_tls::_ucid, _pssmem, _psslog)
 			{
 				_protoc = EC_NET_SS_HTTPS;
-				_txt.append(pu, size);
 			}
 		protected:
 			virtual int ws_iosend(const void* pdata, size_t size)
@@ -56,7 +56,7 @@ namespace ec
 				int nr = session_tls::onrecvbytes(pdata, size, &data);
 				if (nr < 0)
 					return nr;
-				return ws_onrecvbytes(data.data(), data.size(), pmsgout);
+				return ws_onrecvbytes(data.data(), data.size(), pmsgout, _rbuf);
 			};
 
 			virtual int send(const void* pdata, size_t size)

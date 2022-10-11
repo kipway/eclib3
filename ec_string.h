@@ -2,11 +2,11 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.4.29
+\update 2022.9.27
 
 string , bytes and string functions
 
-eclib 3.0 Copyright (c) 2017-2021, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,7 +32,8 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_alloctor.h"
 namespace std
 {
-	using bytes = basic_string<uint8_t>; // std::bytes
+	using bytes = basic_string<uint8_t, char_traits<uint8_t>, ec::std_allocator<uint8_t>>; // std::bytes
+	using mstring = basic_string<char, char_traits<char>, ec::std_allocator<char>>; //self allocator std::string
 }
 
 #define WIN_CP_GBK  936
@@ -71,15 +72,15 @@ namespace ec
 	struct ec_string_alloctor { // use ec_alloctor
 		void* malloc_(size_t size, size_t* poutsize)
 		{
-			if (size > p_ec_allocator->maxblksize()) { // use ::malloc, 1.5x size
+			if (size > get_ec_allocator()->maxblksize()) { // use ::malloc, 1.5x size
 				size = (size % 8) ? (size + 8u - size % 8u) : size;
-				return p_ec_allocator->malloc_(size + size / 2u, poutsize);
+				return get_ec_allocator()->malloc_(size + size / 2u, poutsize);
 			}
-			return p_ec_allocator->malloc_(size, poutsize);
+			return get_ec_allocator()->malloc_(size, poutsize);
 		}
 
 		void free_(void* p) {
-			p_ec_allocator->free_(p);
+			get_ec_allocator()->free_(p);
 		}
 	};
 
@@ -585,14 +586,14 @@ namespace ec
 		}
 
 #ifdef _WIN32
-		bool printf(const char * format, ...)
+		bool format(const char * format, ...)
 #else
-		bool printf(const char * format, ...) __attribute__((format(printf, 2, 3)))
+		bool format(const char * format, ...) __attribute__((format(printf, 2, 3)))
 #endif
 		{
 			int n = 0;
 			clear();
-			if (!recapacity(EC_OBJ_MID_SIZE - sizeof(t_h) - 1))
+			if (!recapacity(200 - sizeof(t_h) - 1))
 				return false;
 			else {
 				va_list arg_ptr;
@@ -627,6 +628,8 @@ namespace ec
 
 	inline int stricmp(const char*s1, const char*s2)
 	{
+		if (s1 == s2)
+			return 0;
 #ifdef _WIN32
 		return ::_stricmp(s1, s2);
 #else
@@ -688,8 +691,11 @@ namespace ec
 	template<typename charT>
 	bool strieq(const charT* s1, const charT* s2)
 	{ //case insensitive equal. return true: equal; false not equal
+		if (s1 == s2)
+			return true;
 		if (!s1 || !s2)
 			return false;
+
 #ifdef _WIN32
 			return (stricmp(s1, s2) == 0);
 #else
@@ -932,6 +938,83 @@ namespace ec
 		}
 		return str;
 #endif
+	}
+
+	template<typename charT
+		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+		size_t struppercpy(charT* sd, const charT* ss, size_t count)
+	{// like strlcpy for linux,add null to the end of sd,return strlen(ss)
+		charT* d = sd;
+		const charT* s = ss;
+		size_t n = count;
+		charT ch;
+
+		if (s == 0 || d == 0) return 0;
+
+		if (!s) {
+			*d = 0;
+			return d;
+		}
+		/* Copy as many bytes as will fit */
+		if (n != 0 && --n != 0)
+		{
+			do
+			{
+				ch = *s++;
+				if ((*d++ = _to_upper(ch)) == 0)
+					break;
+			} while (--n != 0);
+		}
+
+		/* Not enough room in dst, add NUL and traverse rest of src */
+		if (n == 0)
+		{
+			if (count != 0)
+				*d = '\0';                /* NUL-terminate dst */
+			while (*s++)
+				;
+		}
+
+		return(s - ss - 1);        /* count does not include NUL */
+	}
+
+	template<typename charT
+		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
+		size_t strlowercpy(charT* sd, const charT* ss, size_t count)
+	{// like strlcpy for linux,add null to the end of sd,return strlen(ss)
+		charT* d = sd;
+		const charT* s = ss;
+		size_t n = count;
+		charT ch;
+
+		if (s == 0 || d == 0) return 0;
+
+		if (!s) {
+			*d = 0;
+			return d;
+		}
+
+		/* Copy as many bytes as will fit */
+		if (n != 0 && --n != 0)
+		{
+			do
+			{
+				ch = *s++;
+				if ((*d++ = _to_lower(ch)) == 0)
+					break;
+			} while (--n != 0);
+		}
+
+		/* Not enough room in dst, add NUL and traverse rest of src */
+		if (n == 0)
+		{
+			if (count != 0)
+				*d = '\0';                /* NUL-terminate dst */
+			while (*s++)
+				;
+		}
+
+		return(s - ss - 1);        /* count does not include NUL */
 	}
 
 	template<typename charT

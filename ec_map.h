@@ -2,13 +2,13 @@
 \file ec_hashmap.h
 \author jiangyong
 \email  kipway@outlook.com
-\update 2022.4.23
+\update 2022.10.8
 
 hashmap
 	A hash map class, incompatible with std::unordered_map.
 	iterator:	a forward iterator to value_type(not pair for key-val).
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -50,10 +50,42 @@ namespace ec
 		using const_reference = const value_type &;
 		using key_type = _Kty;
 		using size_type = size_t;
-
-		struct t_node {
-			t_node*     pNext;
+		
+		class  t_node {
+		public:
+			t_node* pNext;
 			value_type  value;
+		public:
+			t_node() : pNext(nullptr) {
+			}
+
+			t_node(value_type& v) : pNext(nullptr) {
+				value = v;
+			}
+
+			t_node(value_type&& v) : pNext(nullptr) {
+				value = std::move(v);
+			}
+
+			template <typename... Args>
+			t_node(Args&&... args) : pNext(nullptr), value(std::forward<Args>(args)...) {
+			}
+
+			static void* operator new(size_t size)
+			{
+				return get_ec_allocator()->malloc_(size);
+			}
+			static void* operator new(size_t size, void* ptr)
+			{
+				return ptr;
+			}
+			static void operator delete(void* p)
+			{
+				get_ec_allocator()->free_(p);
+			}
+			static void operator delete(void* ptr, void* voidptr2) noexcept
+			{
+			}
 		};
 
 		class iterator
@@ -99,32 +131,21 @@ namespace ec
 		t_node**	_ppv;
 		size_type   _uhashsize;
 		size_type   _usize;
-		blk_alloctor<>* _pmem;
 	private:
-		t_node* new_node()
-		{
-			t_node* pnode = (t_node*)_pmem->malloc_(sizeof(t_node), nullptr);
-			if (pnode)
-				new(&pnode->value)value_type();
-			return pnode;
-		}
 		void free_node(t_node* p)
 		{
 			if (!p)
 				return;
 			_DelVal()(p->value);
-			if (std::is_class<_Ty>::value)
-				p->value.~value_type();
-			_pmem->free_(p);
+			delete p;
 		}
-
 		void del_node(t_node* p)
 		{
 			if (!p)
 				return;
-			_pmem->free_(p);
+			delete p;
 		}
-
+		
 	public:
 		hashmap(const hashmap&) = delete;
 		hashmap& operator = (const hashmap&) = delete;
@@ -134,8 +155,7 @@ namespace ec
 			, _uhashsize(uhashsize)
 			, _usize(0)
 		{
-			_pmem = new blk_alloctor<>(size_node(), uhashsize / 2 < 32 ? 32 : uhashsize / 2);
-			_ppv = new t_node*[_uhashsize];
+			_ppv = (t_node**)get_ec_allocator()->malloc_(_uhashsize * sizeof(t_node*));
 			if (nullptr == _ppv)
 				return;
 			memset(_ppv, 0, sizeof(t_node*) * _uhashsize);
@@ -145,12 +165,8 @@ namespace ec
 		{
 			clear();
 			if (_ppv) {
-				delete[] _ppv;
+				get_ec_allocator()->free_(_ppv);
 				_ppv = nullptr;
-			}
-			if (_pmem) {
-				delete _pmem;
-				_pmem = nullptr;
 			}
 		}
 
@@ -160,11 +176,9 @@ namespace ec
 			_ppv = v._ppv;
 			_uhashsize = v._uhashsize;
 			_usize = v._usize;
-			_pmem = v._pmem;
 
 			v._ppv = nullptr;
 			v._usize = 0;
-			v._pmem = nullptr;
 			return *this;
 		}
 
@@ -206,10 +220,9 @@ namespace ec
 					return true;
 				}
 			}
-			pnode = new_node();
+			pnode = new t_node(Value);
 			if (pnode == nullptr)
 				return false;
-			pnode->value = Value;
 			pnode->pNext = _ppv[upos];
 			_ppv[upos] = pnode;
 			_usize++;
@@ -229,10 +242,9 @@ namespace ec
 					return true;
 				}
 			}
-			pnode = new_node();
+			pnode = new t_node(std::move(Value));
 			if (pnode == nullptr)
 				return false;
-			pnode->value = std::move(Value);
 			pnode->pNext = _ppv[upos];
 			_ppv[upos] = pnode;
 			_usize++;
@@ -374,6 +386,32 @@ namespace ec
 			return bret;
 		}
 
+		template <typename... Args>
+		bool emplace(key_type key, Args&&... args) noexcept
+		{
+			if (nullptr == _ppv)
+				return false;
+			size_type upos = _Hasher()(key) % _uhashsize;
+			t_node** ppNodePrev;
+			ppNodePrev = &_ppv[upos];
+			t_node* pNode;
+			for (pNode = *ppNodePrev; pNode != nullptr; pNode = pNode->pNext) {
+				if (_Keyeq()(key, pNode->value)) {
+					*ppNodePrev = pNode->pNext;
+					free_node(pNode);
+					_usize--;
+					break;
+				}
+				ppNodePrev = &pNode->pNext;
+			}
+			pNode = new t_node(std::forward<Args>(args)...);
+			if (!pNode)
+				return false;
+			pNode->pNext = _ppv[upos];
+			_ppv[upos] = pNode;
+			_usize++;
+			return true;
+		}
 	protected:
 		uint64_t _nexti(unsigned int ih, unsigned int il) noexcept
 		{

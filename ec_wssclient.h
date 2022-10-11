@@ -2,7 +2,7 @@
 \file ec_wssclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.8.25
+\update 2022.8.5
 
 wss_c
 	a Client websocket class based on HTTPS (TLS1.2)
@@ -29,7 +29,6 @@ namespace ec
 			, _ws(pmem, plog)
 
 		{
-			_rbuf.reserve(1024 * 4);
 		}
 
 		int get_ws_status()
@@ -38,7 +37,7 @@ namespace ec
 		}
 	private:
 		int _nstatus; // 0: none handshaked;  1:handshaked
-		bytes _rbuf;
+		parsebuffer _rbuf;
 		websocketclient _ws;
 	protected:
 		virtual void onwshandshake() = 0;
@@ -67,7 +66,6 @@ namespace ec
 			bytes pkg(_pmem);
 			pkg.reserve(1024 * 4);
 			_ws.makeRequest(pkg);
-			_rbuf.clear();
 			tls_c::sendbytes(pkg.data(), (int)pkg.size());
 		}
 
@@ -75,6 +73,7 @@ namespace ec
 		{
 			tls_c::ondisconnected();
 			_nstatus = 0;
+			_rbuf.free();
 		}
 
 		virtual void ontlsdata(const uint8_t* p, int nbytes)
@@ -93,7 +92,7 @@ namespace ec
 					return;
 				_nstatus = 1;
 				onwshandshake();
-				if (!_rbuf.size())
+				if (_rbuf.empty())
 					return;
 			}
 			pkg.clear();
@@ -119,7 +118,6 @@ namespace ec
 					return;
 				}
 			}
-			_rbuf.shrink_to_fit();
 		}
 
 		int sendwsbytes(const void* p, int nlen, int opcode)

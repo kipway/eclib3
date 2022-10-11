@@ -2,12 +2,12 @@
 \file ec_tcpclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.2.26
+\update 2022.8.25
 
 tcp_c
 	a class for tcp client, support socks5 proxy, asynchronous connection
 
-eclib 3.0 Copyright (c) 2017-2030, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -70,7 +70,7 @@ namespace ec
 
 		virtual ~tcp_c()
 		{
-			if (INVALID_SOCKET == _sock) {
+			if (INVALID_SOCKET != _sock) {
 				::closesocket(_sock);
 				_sock = INVALID_SOCKET;
 			}

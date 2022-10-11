@@ -2,7 +2,7 @@
 \file ec_netsrv_base.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.7.6
+\update 2022.8.4
 
 session class for net::server.
 
@@ -91,12 +91,8 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #define EC_NET_SNDBUF_BLOCKSIZE (1024 * 32)
 #endif
 
-#ifndef EC_NET_SNDBUF_GLOBALSIZE
-#define EC_NET_SNDBUF_GLOBALSIZE (1024 * 1024 * 128)
-#endif
-
-#ifndef EC_NET_SNDBUF_NUMBLKS
-#define EC_NET_SNDBUF_NUMBLKS 1024
+#ifndef EC_NET_SNDBUF_HEAPSIZE
+#define EC_NET_SNDBUF_HEAPSIZE (1024 * 1024 * 8) // 8M heap size, grow by heap
 #endif
 
 namespace ec
@@ -203,27 +199,52 @@ namespace ec
 		public:
 			session& operator = (const session& v) = delete;
 			session(const session& v) = delete;
-			session(uint32_t listenid, uint32_t ucid, SOCKET  fd, uint32_t protoc, uint32_t status, memory* pmem, ilog* plog, block_allocator* pblkallocator) :
+			session(uint32_t listenid, uint32_t ucid, SOCKET  fd, uint32_t protoc, uint32_t status, memory* pmem, ilog* plog, blk_alloctor<>* pblkallocator) :
 				_listenid(listenid), _protoc(protoc), _status(status), _fd(fd), _ucid(ucid)
 				, _timesndblcok(0), _time_err(0)
-				, _pause_r(0), _peerport(0), _pextdata(nullptr)
-				, _pssmem(pmem), _psslog(plog), _rbuf(pmem)
-				,_sndbuf(EC_NET_SNDBUF_NUMBLKS * pblkallocator->get_blksize(), pblkallocator)
+				, _pause_r(0), _peerport(0), _rbuf(pmem), _pextdata(nullptr)
+				, _pssmem(pmem), _psslog(plog)
+				,_sndbuf(NET_SENDBUF_MAXSIZE, pblkallocator)
 			{
 				_ip[0] = 0;
 				_timelastio = ::time(0);
 				_timeconnect = ec::mstime();
 			}
+			/*
 			session(session* p) : _listenid(p->_listenid), _protoc(p->_protoc), _status(p->_status), _fd(p->_fd), _ucid(p->_ucid)
 				, _timelastio(p->_timelastio), _timesndblcok(p->_timesndblcok), _time_err(p->_time_err)
 				, _pause_r(p->_pause_r), _peerport(p->_peerport), _timeconnect(p->_timeconnect), _pextdata(p->_pextdata)
-				, _pssmem(p->_pssmem), _psslog(p->_psslog), _rbuf(p->_pssmem)
+				, _pssmem(p->_pssmem), _psslog(p->_psslog), _rbuf(std::move(p->_rbuf))
 				, _sndbuf(std::move(p->_sndbuf))
 			{
 				memcpy(_ip, p->_ip, sizeof(_ip));
 				p->_fd = INVALID_SOCKET;//move
 				p->_pextdata = nullptr; //move
+			}*/
+
+			session(session&& v) noexcept
+				: _rbuf(std::move(v._rbuf)), _sndbuf(std::move(v._sndbuf))
+			{
+				_listenid = v._listenid;
+				_protoc = v._protoc;
+				_status = v._status;
+				_fd = v._fd;
+				_ucid = v._ucid;
+				_timelastio = v._timelastio;
+				_timesndblcok = v._timesndblcok;
+				_time_err = v._time_err;
+				_pause_r = v._pause_r;
+				_peerport = v._peerport;
+				_timeconnect = v._timeconnect;
+				_pextdata = v._pextdata;
+				_pssmem = v._pssmem;
+				_psslog = v._psslog;
+
+				memcpy(_ip, v._ip, sizeof(_ip));
+				v._fd = INVALID_SOCKET;//move
+				v._pextdata = nullptr; //move
 			}
+
 			virtual ~session()
 			{
 #ifdef _DEBUG
@@ -288,13 +309,12 @@ namespace ec
 			int      _pause_r; // 1:pause read; 0: normal read
 			uint16_t _peerport;// peerport
 			int64_t  _timeconnect; // GMT from 1970-1-1 millisecond(1/1000 second)
+			ec::parsebuffer  _rbuf;
 		private:
 			ssext_data* _pextdata; //application session extension data
 		protected:
 			memory* _pssmem; // Memory allocator
 			ilog*   _psslog;
-			bytes  _rbuf;
-
 			friend class session_tls;
 			friend class session_ws;
 			friend class session_wss;
@@ -319,7 +339,7 @@ namespace ec
 			friend class EC_SS_EXTCLASS6;
 #endif
 		private:
-			cycle_fifo _sndbuf;
+			ec::io_buffer<> _sndbuf;
 		public:
 			/*!
 			\brief do receive bytes
@@ -331,9 +351,8 @@ namespace ec
 			*/
 			virtual int onrecvbytes(const void* pdata, size_t size, bytes* pmsgout)
 			{
-				_rbuf.append((uint8_t*)pdata, size);
 				pmsgout->clear();
-				pmsgout->append(_rbuf.data(), _rbuf.size());
+				pmsgout->append(pdata, size);
 				_timelastio = ::time(0);
 				return 0;
 			};
@@ -358,8 +377,6 @@ namespace ec
 
 			int iosend(const void* pkg, size_t pkgsize)
 			{
-				if (_sndbuf.isnull()) //无缓存模式
-					return  send_non_block(_fd, (const uint8_t*)pkg, (int)pkgsize);
 				if (_sndbuf.empty()) {
 					int ns = send_non_block(_fd, pkg, (int)pkgsize);
 					if (ns < 0)
@@ -371,25 +388,24 @@ namespace ec
 
 			int  sendbuf() // return -1 error; >= 0 send size
 			{
-				if (_sndbuf.isnull() || _sndbuf.empty())
+				if (_sndbuf.empty())
 					return 0;
 				int nr = 0, ns;
-				ec::cycle_fifo::blk_* pblk = _sndbuf.top();
-				while (pblk) {
-					if (pblk->pos >= pblk->len) {
-						_sndbuf.pop();
-						pblk = _sndbuf.top();
-						continue;
-					}
-					ns = send_non_block(_fd, pblk->buf + pblk->pos,(int)(pblk->len - pblk->pos));
+				const void* pd = nullptr;
+				size_t zlen = 0;
+
+				pd = _sndbuf.get(zlen);
+				while (pd && zlen) {
+					ns = send_non_block(_fd, pd, (int)(zlen));
 					if (ns < 0)
 						return -1;
 					else if (!ns)
 						return nr;
+					_sndbuf.freesize(ns);
 					nr += ns;
-					pblk->pos += ns;
-					if (pblk->pos < pblk->len)
+					if (ns < (int)(zlen))
 						break;
+					pd = _sndbuf.get(zlen);
 				}
 				return nr;
 			}
@@ -398,10 +414,7 @@ namespace ec
 			{
 				return _sndbuf.size();
 			}
-			inline size_t datablks()
-			{
-				return _sndbuf.blks();
-			}
+
 			bool sndbufempty() {
 				return _sndbuf.empty();
 			}
@@ -417,7 +430,7 @@ namespace ec
 		class listen_session : public session
 		{
 		public:
-			listen_session(uint32_t ucid, SOCKET  fd, memory* pmem, ilog* plog, block_allocator* pblkallocator) :
+			listen_session(uint32_t ucid, SOCKET  fd, memory* pmem, ilog* plog, blk_alloctor<>* pblkallocator) :
 				session(ucid, ucid, fd, EC_NET_SS_LISTEN, EC_NET_ST_WORK, pmem, plog, pblkallocator)
 			{
 			}
@@ -436,7 +449,7 @@ namespace ec
 		class session_udpsrv : public session
 		{
 		public:
-			session_udpsrv(uint32_t ucid, SOCKET  fd, memory* pmem, ilog* plog, block_allocator* pblkallocator) :
+			session_udpsrv(uint32_t ucid, SOCKET  fd, memory* pmem, ilog* plog, blk_alloctor<>* pblkallocator) :
 				session(ucid, ucid, fd, EC_NET_SS_LISTEN, EC_NET_ST_PRE, pmem, plog, pblkallocator)
 			{
 			}

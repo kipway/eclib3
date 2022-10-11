@@ -2,14 +2,14 @@
 \file ec_config.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.10.12
+\update 2022.9.9
 
 namespace cfg
 	tools for ini, config file.
 namespace csv
 	tools csv file.
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -109,6 +109,45 @@ namespace ec
 		{
 			return ftell(_pf);
 		}
+		bool isutf8()
+		{
+			if (!_pf)
+				return true;
+			seek(0, SEEK_SET);
+			int c1 = getc(), c2 = getc(), c3 = getc();
+			if (c1 == 0xef && c2 == 0xbb && c3 == 0xbf) // utf8 with bom
+				return true;
+			seek(0, SEEK_SET);
+
+			uint8_t c;
+			int nb = 0, nc;
+			while (EOF != (nc = getc())) {
+				c = (uint8_t)nc;
+				if (!nb) {
+					if (!(c & 0x80))
+						continue;
+					if (0xc0 == c || 0xc1 == c || c > 0xF4) // RFC 3629
+						return false;
+					if ((c & 0xFC) == 0xFC) // 1111 1100
+						nb = 5;
+					else if ((c & 0xF8) == 0xF8) // 1111 1000
+						nb = 4;
+					else if ((c & 0xF0) == 0xF0) // 1111 0000
+						nb = 3;
+					else if ((c & 0xE0) == 0xE0) // 1110 0000
+						nb = 2;
+					else if ((c & 0xC0) == 0xC0) // 1100 0000
+						nb = 1;
+					else
+						return false;
+					continue;
+				}
+				if ((c & 0xC0) != 0x80)
+					return false;
+				nb--;
+			}
+			return !nb;
+		}
 	private:
 		FILE* _pf;
 	};
@@ -168,7 +207,7 @@ namespace ec
 						stmp[np++] = c;
 				}
 			}
-			if (!nerr && np > 0) {
+			if (!nerr) {
 				stmp[np] = 0;
 				nerr = fun(nr, nc, stmp, true);
 			}
@@ -185,6 +224,38 @@ namespace ec
 		{
 			rstream_file fs(sfile);
 			return !fs.available() ? -1 : scan(&fs, fun);
+		}
+
+		template<class _STR>
+		_STR& outfield(const char* src, size_t zlen, _STR& sout)
+		{
+			if (!src || !zlen)
+				return sout;
+
+			int i, n = (int)zlen, ndo = 0;
+			for (i = 0; i < n; i++) {
+				if (src[i] == ',')
+					ndo |= 1;
+				else if (src[i] == '\"')
+					ndo |= 2;
+			}
+			if (ndo == 1) {
+				sout.push_back('\"');
+				sout.append(src, zlen);
+				sout.push_back('\"');
+			}
+			else if (ndo & 2) {
+				sout.push_back('\"');
+				for (i = 0; i < n; i++) {
+					if (src[i] == '\"')
+						sout.push_back('\"');
+					sout.push_back(src[i]);
+				}
+				sout.push_back('\"');
+			}
+			else
+				sout.append(src, zlen);
+			return sout;
 		}
 	} //namespace csv
 

@@ -2,7 +2,7 @@
 \file ec_netsrv_tls.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2022.8.4
 
 net::session_tls
 	TLS1.2 session.
@@ -13,7 +13,7 @@ net::session_tls
 	CipherSuite TLS_RSA_WITH_AES_128_CBC_SHA = {0x00,0x2F};
 	CipherSuite TLS_RSA_WITH_AES_256_CBC_SHA = {0x00,0x35};
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -29,47 +29,45 @@ namespace ec
 {
 	namespace net
 	{
-		class session_tls : public net::session, public tls::sessionserver
+		class session_tls : public session
 		{
+		protected:
+			ec::tls::sessionserver _tls;
 		public:
 			/*!
 			\brief construct for update session
 			*/
-			session_tls(net::session* ps, const void* pcer, size_t cerlen,
+			session_tls(session&& ss, const void* pcer, size_t cerlen,
 				const void* pcerroot, size_t cerrootlen, std::mutex *pRsaLck, RSA* pRsaPrivate) :
-				net::session(ps),
-				tls::sessionserver(ps->_ucid, pcer, cerlen, pcerroot, cerrootlen, pRsaLck, pRsaPrivate, ps->_pssmem, ps->_psslog)
+				session(std::move(ss)),
+				_tls(ss._ucid, pcer, cerlen, pcerroot, cerrootlen, pRsaLck, pRsaPrivate, ss._pssmem, ss._psslog)
 			{
-				_pkgtcp.append(ps->_rbuf.data(), ps->_rbuf.size());
+				_tls.appendreadbytes(_rbuf.data_(), _rbuf.size_());
+				_rbuf.free();
 				_protoc = EC_NET_SS_TLS;
 				_status = EC_NET_ST_CONNECT;
-				ps->_rbuf.clear();
-				ps->_rbuf.shrink_to_fit();
+				_tls.SetIP(session::_ip);
 			}
 
 			/*!
 			\brief construct for move session
 			*/
-			session_tls(session_tls* ps) : net::session(ps), tls::sessionserver(ps)
+			session_tls(session_tls&& ss) : session(std::move(ss)), _tls(std::move(ss._tls))
 			{
-				_pkgtcp.append(ps->_rbuf.data(), ps->_rbuf.size());
-				_protoc = EC_NET_SS_TLS;
-				_status = EC_NET_ST_CONNECT;
-				ps->_rbuf.clear();
-				ps->_rbuf.shrink_to_fit();
 			}
 		public:
 			virtual void setip(const char* sip)
 			{
 				net::session::setip(sip);
-				SetIP(sip);
+				_tls.SetIP(sip);
 			};
 
+			// pmsgout save appdata
 			virtual int onrecvbytes(const void* pdata, size_t size, bytes* pmsgout)
 			{
 				int nr = -1;
 				pmsgout->clear();
-				int nst = OnTcpRead(pdata, size, pmsgout);
+				int nst = _tls.OnTcpRead(pdata, size, pmsgout);
 				if (TLS_SESSION_ERR == nst || TLS_SESSION_OK == nst || TLS_SESSION_NONE == nst) {
 					nr = TLS_SESSION_ERR == nst ? -1 : 0;
 					if (pmsgout->size()) {
@@ -83,23 +81,22 @@ namespace ec
 					nr = 0;
 					if (pmsgout->size()) {
 						if (iosend(pmsgout->data(), (int)pmsgout->size()) < 0)
-							nr = -1;
+							return TLS_SESSION_ERR;
 					}
-					if (nr != -1)
-						_status = EC_NET_ST_WORK;
-					pmsgout->clear();
-					return nr;
+					_status = EC_NET_ST_WORK;
+					return onrecvbytes(nullptr, 0, pmsgout);//继续解析数据。
 				}
-				else if (TLS_SESSION_APPDATA == nst)
+				else if (TLS_SESSION_APPDATA == nst) {
 					nr = 0;
+				}
 				return nr;
 			}
 
 			virtual int send(const void* pdata, size_t size, int timeoutmsec = 1000)
 			{
-				bytes tlspkg(_pmem);
+				bytes tlspkg(_pssmem);
 				tlspkg.reserve(size + 1024 - size % 1024);
-				if (MakeAppRecord(&tlspkg, pdata, size))
+				if (_tls.MakeAppRecord(&tlspkg, pdata, size))
 					return iosend(tlspkg.data(), (int)tlspkg.size());
 				return -1;
 			}

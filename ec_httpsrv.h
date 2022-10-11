@@ -25,7 +25,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_http.h"
 
 #ifndef MAXSIZE_HTTP_DOWNFILE
-#ifdef _ARM_LINUX
+#ifdef _MEM_TINY
 #define MAXSIZE_HTTP_DOWNFILE (2 * 1024 * 1024)
 #else
 #define MAXSIZE_HTTP_DOWNFILE (32 * 1024 * 1024)

@@ -2,12 +2,12 @@
 \file ec_vector.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.5.5
+\update 2022.10.6
 
 vector
 	a extend vector class for trivially copyable type, and expanded some functions, can be used as string, stack, stream
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -145,22 +145,20 @@ namespace ec
 		{
 			if (_pmem)
 				return _pmem->malloc(size, sizeout);
-			sizeout = size;
-			return ::malloc(size);
+			return get_ec_allocator()->malloc_(size, &sizeout);
 		}
 		inline void *mem_realloc(void* ptr, size_t size, size_t &sizeout)
 		{
 			if (_pmem)
 				return _pmem->realloc(ptr, size, sizeout);
-			sizeout = size;
-			return ::realloc(ptr, size);
+			return get_ec_allocator()->realloc_(ptr, size, &sizeout);
 		}
 		inline void mem_free(void* p)
 		{
 			if (_pmem)
 				_pmem->mem_free(p);
 			else
-				::free(p);
+				get_ec_allocator()->free_(p);
 		}
 
 		void _grown(size_type usize = 1)
@@ -180,14 +178,9 @@ namespace ec
 
 			value_type	*pt = nullptr;
 			size_t sizeout = 0;
-			pt = (value_type*)mem_malloc(usizet * sizeof(value_type), sizeout);
+			pt = (value_type*)mem_realloc(_pbuf, usizet * sizeof(value_type), sizeout);
 			if (!pt)
 				throw std::bad_alloc();
-			if (_pbuf) {
-				if (_usize)
-					memcpy(pt, _pbuf, _usize * sizeof(value_type));
-				mem_free(_pbuf);
-			}
 			_ubufsize = sizeout / sizeof(value_type);
 			_pbuf = pt;
 		}

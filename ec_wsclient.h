@@ -2,7 +2,7 @@
 \file ec_wsclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.8.25
+\update 2022.8.5
 
 ws_c
 	class for websocket client
@@ -142,11 +142,11 @@ namespace ec
 		}
 
 		template<class _Out>
-		int doRequest(_Out& rin, _Out& pkg)
+		int doRequest(parsebuffer& rin, _Out& pkg)
 		{
 			pkg.clear();
 			http::package htp;
-			int nlen = htp.parse((const char*)rin.data(), rin.size());
+			int nlen = htp.parse((const char*)rin.data_(), rin.size_());
 			if (nlen < 0) {
 				return -1;
 				if (_plog)
@@ -169,24 +169,23 @@ namespace ec
 				_wscompress = ws_x_webkit_deflate_frame;
 			else
 				_wscompress = 0; //no compress
-			rin.erase(0, nlen);
+			rin.freehead(nlen);
 			return 1;
 		}
 
 		template<class _Out>
-		int doWsData(_Out& rbuf, _Out* pmsgout, int* popcode = nullptr)
+		int doWsData(parsebuffer& rbuf, _Out* pmsgout, int* popcode = nullptr)
 		{
 			size_t sizedo = 0;
 			pmsgout->clear();
-			int nr = WebsocketParse((const char*)rbuf.data(), rbuf.size(), sizedo, pmsgout, popcode);//websocket
+			int nr = WebsocketParse((const char*)rbuf.data_(), rbuf.size_(), sizedo, pmsgout, popcode);//websocket
 			if (nr == he_failed) {
-				rbuf.clear();
+				rbuf.free();
 				return -1;
 			}
 			else {
 				if (sizedo) {
-					rbuf.erase(0, sizedo);
-					rbuf.reserve(0);
+					rbuf.freehead(sizedo);
 				}
 			}
 			return 0;
@@ -204,6 +203,8 @@ namespace ec
 		void reset_msg()
 		{
 			_wsmsg.clear();
+			if (_wsmsg.capacity() > 1024 * 32)
+				_wsmsg.shrink_to_fit();
 			_comp = 0;
 			_opcode = WS_OP_TXT;
 		}
@@ -353,7 +354,6 @@ namespace ec
 			, _ws(pmem, plog)
 
 		{
-			_rbuf.reserve(1024 * 4);
 		}
 
 		int get_ws_status()
@@ -366,7 +366,7 @@ namespace ec
 		memory* _pmem;
 		ilog* _plog;
 	private:
-		bytes _rbuf;
+		parsebuffer _rbuf;
 		websocketclient _ws;
 
 	protected:
@@ -397,13 +397,13 @@ namespace ec
 			bytes pkg(_pmem);
 			pkg.reserve(1024 * 4);
 			_ws.makeRequest(pkg);
-			_rbuf.clear();
 			tcp_c::sendbytes(pkg.data(), (int)pkg.size());
 		}
 
 		virtual void ondisconnected()
 		{
 			_nstatus = 0;
+			_rbuf.free();
 		}
 
 		virtual void onreadbytes(const uint8_t* p, int nbytes)
@@ -422,7 +422,7 @@ namespace ec
 					return;
 				_nstatus = 1;
 				onwshandshake();
-				if (!_rbuf.size())
+				if (_rbuf.empty())
 					return;
 			}
 			pkg.clear();
@@ -448,7 +448,6 @@ namespace ec
 					return;
 				}
 			}
-			_rbuf.reserve(1024 * 32);
 		}
 
 		int sendwsbytes(const void* p, int nlen, int opcode)

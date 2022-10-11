@@ -2,7 +2,7 @@
 \file ec_netsrv.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.7.6
+\update 2022.10.1
 
 net::server
 	a class for TCP/UDP, HTTP/HTTPS, WS/WSS
@@ -118,7 +118,7 @@ namespace ec
 			int   _pauseread; // 1: pause read ;0 : read
 			size_t _pkgflag_size; // message flag length
 		protected:
-			block_allocator _sndbufblks;
+			ec::blk_alloctor<> _sndbufblks;
 			hashmap<uint32_t, t_ssbufsize> _mapbufsize;// send buffer block size map
 #if (0 != ECNETSRV_TLS)
 			tls::srvca _ca;  // certificate
@@ -127,6 +127,7 @@ namespace ec
 			char _sucidfile[512];//ucid save file,if nullstring ,use memory ucid from UCID_DYNAMIC_START
 		private:
 			bytes _udpbuf;
+			char _recvtmp[SIZE_TCP_READ_ONCE];
 		public:
 			server(memory* pmem, ilog* plog)
 				: _pmem(pmem)
@@ -137,7 +138,7 @@ namespace ec
 				, _unextid(UCID_DYNAMIC_START)
 				, _unextsrvid(0)
 				, _pkgflag_size(3)
-				, _sndbufblks(EC_NET_SNDBUF_BLOCKSIZE, EC_NET_SNDBUF_GLOBALSIZE / EC_NET_SNDBUF_BLOCKSIZE)
+				, _sndbufblks(EC_NET_SNDBUF_BLOCKSIZE - EC_ALLOCTOR_ALIGN, EC_NET_SNDBUF_HEAPSIZE / EC_NET_SNDBUF_BLOCKSIZE)
 				, _udpbuf(pmem)
 			{
 				_pollkey.reserve(1024);
@@ -643,9 +644,7 @@ namespace ec
 #if (0 != ECNETSRV_TLS)
 			bool initca(const char* filecert, const char* filerootcert, const char* fileprivatekey)
 			{
-				if (_ca._px509)
-					_ca.~srvca();
-				if (!_ca._px509 && !_ca.InitCert(filecert, filerootcert, fileprivatekey)) {
+				if (!_ca.InitCert(filecert, filerootcert, fileprivatekey)) {
 					if (_plog)
 						_plog->add(CLOG_DEFAULT_ERR, "Load certificate failed (%s,%s,%s)", filecert,
 							filerootcert != nullptr ? filerootcert : "none", fileprivatekey);
@@ -776,12 +775,12 @@ namespace ec
 								continue;
 							}
 							if (n > 0)
-								_plog->add(CLOG_DEFAULT_DBG, "ucid(%u) send buf %d bytes, number blocks %zu", puid[i], n, ps->datablks());
+								_plog->add(CLOG_DEFAULT_DBG, "ucid(%u) send buf %d bytes, sndbuf size %zu", puid[i], n, ps->sndbufsize());
 							onsend_c_end(puid[i], ps->_protoc, ps->_listenid);
 						}
 						t_ssbufsize t;
 						t.key = puid[i];
-						t.usize = (uint32_t)ps->datablks();// > sndbufsize();
+						t.usize = (uint32_t)ps->sndbufsize();
 						if (t.usize)
 							_mapbufsize.set(t.key, t);
 						else
@@ -1220,11 +1219,10 @@ namespace ec
 #endif
 			void doread(uint32_t ucid, SOCKET fd)// return true need remake pollfds
 			{
-				char rbuf[SIZE_TCP_READ_ONCE];
 #ifdef _WIN32
-				int nr = ::recv(fd, rbuf, (int)sizeof(rbuf), 0);
+				int nr = ::recv(fd, _recvtmp, (int)sizeof(_recvtmp), 0);
 #else
-				int nr = ::recv(fd, rbuf, (int)sizeof(rbuf), MSG_DONTWAIT);
+				int nr = ::recv(fd, _recvtmp, (int)sizeof(_recvtmp), MSG_DONTWAIT);
 #endif
 				if (nr == 0) { //close gracefully
 					closeucid(ucid);
@@ -1255,7 +1253,7 @@ namespace ec
 				pi->_timelastio = ::time(0);
 				bytes msgr(_pmem);
 				msgr.reserve(1024 * 32);
-				int ndo = pi->onrecvbytes((const uint8_t*)rbuf, nr, &msgr);
+				int ndo = pi->onrecvbytes((const uint8_t*)_recvtmp, nr, &msgr);
 				if (ndo < 0) {
 					closeucid(ucid);
 					if (_plog)
@@ -1275,6 +1273,7 @@ namespace ec
 							_plog->add(CLOG_DEFAULT_DBG, "ucid(%u) update tcp_base protocol top200 %zu bytes from %s.\n%s", ucid, msgr.size(), pi->_ip,
 								bin2view(msgr.data(), nsize, stmp, sizeof(stmp)));
 						}
+						msgr.clear();
 					}
 					else if (1 == nup) {   //update success
 						msgr.clear();
@@ -1295,6 +1294,7 @@ namespace ec
 							_plog->add(CLOG_DEFAULT_DBG, "ucid(%u) update tls_base protocol top200 %zu bytes from %s.\n%s", ucid, msgr.size(), pi->_ip,
 								bin2view(msgr.data(), nsize, stmp, sizeof(stmp)));
 						}
+						msgr.clear();
 					}
 					else if (1 == nup) {   //update success
 						msgr.clear();
@@ -1328,8 +1328,12 @@ namespace ec
 				}
 			}
 
-			int update_basetcp(uint32_t ucid, PNETSS *pi, const uint8_t* pu, size_t size) //base TCP protocol. return -2:not support; -1 :error ; 0:no; 1:ok
+			int update_basetcp(uint32_t ucid, PNETSS *pi, const uint8_t* pmsg, size_t msgsize) //base TCP protocol. return -2:not support; -1 :error ; 0:no; 1:ok
 			{
+				(*pi)->_rbuf.append(pmsg, msgsize);
+				const uint8_t* pu = (const uint8_t*)(*pi)->_rbuf.data_();
+				size_t size = (*pi)->_rbuf.size_();
+
 				if (size < _pkgflag_size)
 					return 0;
 #ifdef _LOG_PROTOCOL_UPDATE
@@ -1349,7 +1353,7 @@ namespace ec
 							_plog->add(CLOG_DEFAULT_MOR, "ucid(%u) update TLS1.2 protocol failed, no server certificate", ucid);
 						return -2;// not support
 					}
-					session_tls *pss = new session_tls(*pi, _ca._pcer.data(), _ca._pcer.size(),
+					session_tls *pss = new session_tls(std::move(**pi), _ca._pcer.data(), _ca._pcer.size(),
 						_ca._prootcer.data(), _ca._prootcer.size(), &_ca._csRsa, _ca._pRsaPrivate);
 					if (!pss)
 						return -1;
@@ -1370,7 +1374,7 @@ namespace ec
 					ec::http::package r;
 					if (r.parse((const char*)pu, size) < 0)
 						return -1;
-					session_ws* pss = new session_ws(*pi, pu, size);
+					session_ws* pss = new session_ws(std::move(**pi));
 					if (!pss)
 						return -1;
 					*pi = pss;
@@ -1385,8 +1389,11 @@ namespace ec
 			}
 
 #if (0 != ECNETSRV_TLS)
-			int update_basetls(uint32_t ucid, PNETSS* pi, const uint8_t* pu, size_t size) //update base TLS protocol. return -1 :error ; 0:no; 1:ok
+			int update_basetls(uint32_t ucid, PNETSS* pi, const uint8_t* pmsg, size_t msgsize) //update base TLS protocol. return -1 :error ; 0:no; 1:ok
 			{
+				(*pi)->_rbuf.append(pmsg, msgsize);
+				const uint8_t* pu = (const uint8_t*)(*pi)->_rbuf.data_();
+				size_t size = (*pi)->_rbuf.size_();
 				if (size < _pkgflag_size)
 					return 0;
 #ifdef _LOG_PROTOCOL_UPDATE
@@ -1407,7 +1414,7 @@ namespace ec
 					ec::http::package r;
 					if (r.parse((const char*)pu, size) < 0)
 						return -1;
-					session_wss* pss = new session_wss((session_tls *)(*pi), pu, size);
+					session_wss* pss = new session_wss(std::move(*((session_tls*)*pi)));
 					if (!pss)
 						return -1;
 					*pi = pss;

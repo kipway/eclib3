@@ -2,7 +2,7 @@
 \file ec_netsrv_ws.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.4.7
+\update 2022.8.4
 
 net server http/ws session class
 
@@ -36,16 +36,15 @@ namespace ec
 			base_ws(const base_ws&) = delete;
 			base_ws& operator = (const base_ws&) = delete;
 
-			base_ws(session* ps) : _ucid(ps->_ucid), _nws(0), _wscompress(0),
-				_txt(ps->_pssmem), _wsmsg(ps->_pssmem),
-				_comp(0), _opcode(WS_OP_TXT), _pwsmem(ps->_pssmem), _pwslog(ps->_psslog)
+			base_ws(uint32_t ucid, memory* pmem, ilog* plog) : _ucid(ucid), _nws(0), _wscompress(0),
+				_wsmsg(pmem),
+				_comp(0), _opcode(WS_OP_TXT), _pwsmem(pmem), _pwslog(plog)
 			{
 			}
 		public:
 			uint32_t _ucid;
 			int _nws; // 0: http ; 1:ws
 			int _wscompress; // ws_x_webkit_deflate_frame or ws_permessage_deflate
-			vector<char> _txt;   // tmp
 			bytes _wsmsg; // ws frame
 			int _comp;// compress flag
 			int _opcode;  // operate code
@@ -65,14 +64,25 @@ namespace ec
 			\remark if return 0 and pmsgout->size()==0, no http message, Waiting for more data。
 			pmsgout byte0=0:http; 1:ws;  byte1 = opcode; byte2-byte7:res 0; byte8-n http/websocket(Indicated in _nws) message
 			*/
-			int ws_onrecvbytes(const void* pdata, size_t size, bytes* pmsgout)
+			int ws_onrecvbytes(const void* pdata, size_t size, bytes* pmsgout, ec::parsebuffer &rbuf)
 			{
 				pmsgout->clear();
-				int nr = DoReadData((const char*)pdata, size, pmsgout);
+				int nr = DoReadData((const char*)pdata, size, pmsgout, rbuf);
 				if (he_failed == nr)
 					return -1;
-				else if (he_ok == nr)
+				else if (he_ok == nr) {
+					const uint8_t* pu = pmsgout->data();
+					if (PROTOCOL_WS == pu[0]) {
+						if (WS_OP_PING == pu[1]) {
+							ws_send(pu + 8, pmsgout->size() - 8u, WS_OP_PONG);
+							pmsgout->clear();
+						}
+						else if (WS_OP_PONG == pu[1]) {
+							pmsgout->clear();
+						}
+					}
 					return 0;
+				}
 				pmsgout->clear();
 				return 0;
 			};
@@ -102,7 +112,7 @@ namespace ec
 					_pwslog->add(CLOG_DEFAULT_ERR, "ws send failed _protocol = %d", _nws);
 				return -1;
 			}
-		private:
+
 			bool DoUpgradeWebSocket(const char* skey, ec::http::package* pPkg)
 			{
 				try {
@@ -165,8 +175,6 @@ namespace ec
 					}
 					vret.append("\x0d\x0a");
 
-					_txt.clear();
-					_txt.shrink_to_fit();
 					int ns = ws_send(vret.data(), vret.size());
 					if (_pwslog) {
 						for (auto& v : vret) {
@@ -343,45 +351,41 @@ namespace ec
 			}
 
 			template<class _Out>
-			int DoReadData(const char* pdata, size_t usize, _Out* pmsgout)
+			int DoReadData(const char* pdata, size_t usize, _Out* pmsgout, ec::parsebuffer& rbuf)
 			{
 				size_t sizedo = 0;
 				pmsgout->clear();
-				_txt.append(pdata, usize);
+				rbuf.append(pdata, usize);
 				if (_nws == PROTOCOL_HTTP) {
 					ec::http::package prs;
-					int nr = prs.parse(_txt.data(), _txt.size());
+					int nr = prs.parse((const char*)rbuf.data_(), rbuf.size_());
 					if (nr > 0) {
 						if (prs.ismethod("GET")) {
 							char skey[128];
 							if (prs.GetWebSocketKey(skey, sizeof(skey))) { //websocket Upgrade
 								bool bupws = DoUpgradeWebSocket(skey, &prs);
-								_txt.erase(0, nr);
-								_txt.shrink_to_fit();
+								rbuf.freehead(nr);
 								return bupws ? he_waitdata : he_failed;
 							}
 						}
-						pmsgout->append((uint8_t*)_txt.data(), nr);
-						_txt.erase(0, nr);
-						_txt.shrink_to_fit();
+						pmsgout->append((uint8_t*)rbuf.data_(), nr);
+						rbuf.freehead(nr);
 						return he_ok;
 					}
 					if (nr < 0) {
-						_txt.clear();
+						rbuf.free();//clear and free buffer
 						pmsgout->clear();
 						return he_failed;
 					}
 					pmsgout->clear();
-					_txt.shrink_to_fit();
 					return he_waitdata;
 				}
-				int nr = WebsocketParse(_txt.data(), _txt.size(), sizedo, pmsgout);//websocket
+				int nr = WebsocketParse((const char*)rbuf.data_(), rbuf.size_(), sizedo, pmsgout);//websocket
 				if (nr == he_failed)
-					_txt.clear();
+					rbuf.free();//clear and free buffer
 				else {
 					if (sizedo) {
-						_txt.erase(0, sizedo);
-						_txt.shrink_to_fit();
+						rbuf.freehead(sizedo);
 					}
 				}
 				return nr;
@@ -397,12 +401,10 @@ namespace ec
 			/*!
 			\brief construct for update session
 			*/
-			session_ws(session* ps, const uint8_t* pu, size_t size) :
-				session(ps), base_ws(ps)
+			session_ws(session&& ss) :
+				session(std::move(ss)), base_ws(session::_ucid, _pssmem, _psslog)
 			{
 				_protoc = EC_NET_SS_HTTP;
-				_txt.append(pu, size);
-				ps->_fd = INVALID_SOCKET;// move
 			}
 		protected:
 			virtual int ws_iosend(const void* pdata, size_t size)
@@ -419,7 +421,7 @@ namespace ec
 			virtual int onrecvbytes(const void* pdata, size_t size, bytes* pmsgout)
 			{
 				_timelastio = ::time(0);
-				return ws_onrecvbytes(pdata, size, pmsgout);
+				return ws_onrecvbytes(pdata, size, pmsgout, _rbuf);
 			};
 
 			virtual int send(const void* pdata, size_t size)

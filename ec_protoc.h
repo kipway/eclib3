@@ -1,8 +1,8 @@
 ﻿/*!
-\file ec_protobuf.h
+\file ec_protoc.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.4.9
+\update 2022.9.23
 
 classes to encode/decode google protocol buffer,support proto3
 
@@ -222,7 +222,7 @@ namespace ec
 			bool out_fixed32(_Tp v, _Out* pout)  //out 32-bit (fixed32,sfixed32,float)
 		{
 			if (bigendian()) {
-				register uint32_t* p = (uint32_t*)&v;
+				uint32_t* p = (uint32_t*)&v;
 				*p = bswap_32(*p);
 			}
 			using ctype = typename _Out::value_type;
@@ -235,7 +235,7 @@ namespace ec
 			bool out_fixed64(_Tp v, _Out* pout)  //out 64-bit (fixed64,sfixed64,double)
 		{
 			if (bigendian()) {
-				register uint64_t* p = (uint64_t*)&v;
+				uint64_t* p = (uint64_t*)&v;
 				*p = bswap_64(*p);
 			}
 			using ctype = typename _Out::value_type;
@@ -651,6 +651,7 @@ namespace ec
 	}//pb
 }//ec
 
+#define CASE_U16(id,var) case id: var = static_cast<uint16_t>(val);break;
 #define CASE_I32(id,var) case id: var = static_cast<int32_t>(val);break;
 #define CASE_U32(id,var) case id: var = static_cast<uint32_t>(val);break;
 #define CASE_I64(id,var) case id: var = static_cast<int64_t>(val);break;

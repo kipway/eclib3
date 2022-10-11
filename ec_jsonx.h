@@ -2,12 +2,12 @@
 \file ec_jsonx.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.2.8
+\update 2022.10.9
 
 json
 	a fast json parse class
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,7 +16,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #pragma once
 #include <string.h>
 #include <string>
-#include <vector>
+#include "ec_vector.h"
 #ifndef MAXSIZE_JSONX_KEY
 #	define MAXSIZE_JSONX_KEY 63
 #endif
@@ -72,7 +72,7 @@ namespace ec
 			}
 		};
 	public:
-		std::vector<t_kv> _kvs;
+		ec::vector<t_kv> _kvs;
 	public:
 		json(const json&) = delete;
 		json& operator = (const json&) = delete;
@@ -94,9 +94,9 @@ namespace ec
 				return &_kvs[i];
 			return nullptr;
 		}
-		const t_kv* getkv(const txt &key)
+		const t_kv* getkv(const txt& key)
 		{
-			for (const auto &i : _kvs) {
+			for (const auto& i : _kvs) {
 				if (i._k.ieq(key))
 					return &i;
 			}
@@ -108,16 +108,16 @@ namespace ec
 			return _kvs[pos];
 		}
 
-		const txt* getval(const txt &key)
+		const txt* getval(const txt& key)
 		{
-			for (const auto &i : _kvs) {
+			for (const auto& i : _kvs) {
 				if (i._k.ieq(key))
 					return &i._v;
 			}
 			return nullptr;
 		}
 
-		const txt* getval(const char **keys, size_t zsize)
+		const txt* getval(const char** keys, size_t zsize)
 		{
 			size_t i, n = _kvs.size(), j;
 			for (i = 0; i < n; i++) {
@@ -130,7 +130,7 @@ namespace ec
 		}
 
 		template<class _Str>
-		bool getstr(const txt &key, _Str &sout)
+		bool getstr(const txt& key, _Str& sout)
 		{
 			const txt* pv = getval(key);
 			if (!pv || pv->empty()) {
@@ -146,7 +146,7 @@ namespace ec
 			return true;
 		}
 
-		bool getstr(const txt &key, char *sout, size_t outsize)
+		bool getstr(const txt& key, char* sout, size_t outsize)
 		{
 			const txt* pv = getval(key);
 			if (!pv || pv->empty() || pv->_size >= outsize) {
@@ -158,7 +158,7 @@ namespace ec
 			return true;
 		}
 
-		bool from_str(txt &s)
+		bool from_str(txt& s)
 		{
 			_kvs.clear();
 			if (s.empty())
@@ -178,11 +178,11 @@ namespace ec
 			return from_str(t);
 		}
 
-		static bool load_file(const char *sfile, std::string &sout)
+		static bool load_file(const char* sfile, std::string& sout)
 		{
 			if (!sfile)
 				return false;
-			FILE *pf = fopen(sfile, "rt");
+			FILE* pf = fopen(sfile, "rt");
 			if (!pf)
 				return false;
 			int c = fgetc(pf), c2 = fgetc(pf), c3 = fgetc(pf);
@@ -198,10 +198,10 @@ namespace ec
 			return true;
 		}
 
-		static void del_comment(const char* pin, size_t inlen, std::string &sout)
+		static void del_comment(const char* pin, size_t inlen, std::string& sout)
 		{
 			size_t n = inlen;
-			const char* s = pin, *sp = s;
+			const char* s = pin, * sp = s;
 			while (n) {
 				if (*s == '/') {
 					if (s != pin && *(s - 1) == '*' && !sp)  // */
@@ -222,7 +222,7 @@ namespace ec
 		}
 
 		template<typename _Str>
-		void fromjstr(const char* s, size_t srcsize, _Str &sout) // delete escape, "\\" -> '\', ""\'" -> '"' and set to sout
+		void fromjstr(const char* s, size_t srcsize, _Str& sout) // delete escape, "\\" -> '\', ""\'" -> '"' and set to sout
 		{
 			sout.clear();
 			if (!s || !srcsize)
@@ -239,7 +239,7 @@ namespace ec
 				return;
 			}
 
-			const char *se = s + srcsize;
+			const char* se = s + srcsize;
 			while (s < se) {
 				if (*s == '\\' && s + 1 < se && (*(s + 1) == '\"' || *(s + 1) == '\\'))
 					s++;
@@ -248,9 +248,9 @@ namespace ec
 		}
 
 		template<typename _VAL>
-		bool get_jnumber(const char* key, _VAL &val)
+		bool get_jnumber(const char* key, _VAL& val)
 		{
-			const ec::json::t_kv *pkv;
+			const ec::json::t_kv* pkv;
 			pkv = getkv(key);
 			val = 0;
 			if (!pkv || pkv->_v.empty())
@@ -263,9 +263,9 @@ namespace ec
 		}
 
 		template<typename _STR>
-		bool get_jstring(const char* key, _STR &val)
+		bool get_jstring(const char* key, _STR& val)
 		{
-			const ec::json::t_kv *pkv;
+			const ec::json::t_kv* pkv;
 			pkv = getkv(key);
 			val.clear();
 			if (!pkv)
@@ -274,10 +274,10 @@ namespace ec
 			return true;
 		}
 
-		template<typename _STR>
-		bool get_jstr_array(const char* key, std::vector<_STR>& vals)
+		template<typename _STR, class ALLOCATOR_ = std::allocator<_STR>>
+		bool get_jstr_array(const char* key, std::vector<_STR, ALLOCATOR_>& vals)
 		{
-			const ec::json::t_kv *pkv;
+			const ec::json::t_kv* pkv;
 			pkv = getkv(key);
 			if (!pkv || pkv->_v.empty())
 				return true;
@@ -299,10 +299,10 @@ namespace ec
 			return true;
 		}
 
-		template<typename _VAL>
-		bool get_jnumber_array(const char* key, std::vector<_VAL>& vals)
+		template<typename _VAL, class ALLOCATOR_ = std::allocator<_VAL>>
+		bool get_jnumber_array(const char* key, std::vector<_VAL, ALLOCATOR_>& vals)
 		{
-			const ec::json::t_kv *pkv;
+			const ec::json::t_kv* pkv;
 			pkv = getkv(key);
 			if (!pkv || pkv->_v.empty())
 				return true;
@@ -326,9 +326,25 @@ namespace ec
 		}
 
 		template<typename _CLS>
-		bool get_jobj_array(const char* key, std::vector<_CLS>& vals)
+		bool get_jobject(const char* key, _CLS& val)
 		{
-			const ec::json::t_kv *pkv;
+			const ec::json::t_kv* pkv;
+			pkv = getkv(key);
+			if (!pkv || pkv->_v.empty())
+				return true;
+			if (pkv->_type != ec::json::jobj)
+				return false;
+
+			ec::json jvs, jv;
+			if (!jvs.from_str(pkv->_v._str, pkv->_v._size))
+				return false;
+			return val.fromjson(jvs);
+		}
+
+		template<typename _CLS, class ALLOCATOR_ = std::allocator<_CLS>>
+		bool get_jobj_array(const char* key, std::vector<_CLS, ALLOCATOR_>& vals)
+		{
+			const ec::json::t_kv* pkv;
 			pkv = getkv(key);
 			if (!pkv || pkv->_v.empty())
 				return true;
@@ -347,7 +363,6 @@ namespace ec
 			}
 			return true;
 		}
-
 		template<typename _STR>
 		bool get_jb64(const char* key, _STR& val)
 		{
@@ -392,7 +407,7 @@ namespace ec
 			val = (_VAL)ec::string2jstime(pkv->_v._str, pkv->_v._size);
 		}
 	private:
-		bool from_obj(txt &s)
+		bool from_obj(txt& s)
 		{
 			t_kv  it;
 			if (*s._str != '{')
@@ -459,7 +474,7 @@ namespace ec
 			}
 			return false;
 		}
-		bool from_array(txt &s)
+		bool from_array(txt& s)
 		{
 			t_kv  it;
 			if (*s._str != '[')
@@ -524,7 +539,7 @@ namespace ec
 	\remark inert if key is not exist
 	*/
 	template<class _Str = std::string>
-	int updatejson(_Str &sjs, const char* key, const char* val, ec::json::jtype ty)
+	int updatejson(_Str& sjs, const char* key, const char* val, ec::json::jtype ty)
 	{
 		_Str jso; //temp for out
 		ec::json js;
@@ -593,7 +608,7 @@ namespace ec
 	}
 	namespace js {
 		template<typename _STRVAL, typename _STROUT>
-		void out_jstring(int &nf, const char* key, const _STRVAL& val, _STROUT & sout)
+		void out_jstring(int& nf, const char* key, const _STRVAL& val, _STROUT& sout)
 		{
 			if (val.empty())
 				return;
@@ -607,7 +622,7 @@ namespace ec
 				return;
 			}
 
-			const char *s = val.data(), *se = s + val.size();
+			const char* s = val.data(), * se = s + val.size();
 			while (s < se) {
 				if (*s == '\\' || *s == '\"')
 					sout += '\\';
@@ -641,9 +656,9 @@ namespace ec
 		}
 
 		template<typename _VAL, typename _STROUT>
-		void out_jnumber(int &nf, const char* key, _VAL val, _STROUT & sout)
+		void out_jnumber(int& nf, const char* key, _VAL val, _STROUT& sout, bool force = false)
 		{
-			if (std::is_integral<_VAL>::value && !val)
+			if (std::is_integral<_VAL>::value && !val && !force)
 				return; //整数0为默认值不输出
 			if (nf)
 				sout.push_back(',');
@@ -654,7 +669,18 @@ namespace ec
 		}
 
 		template<typename _CLS, typename _STROUT>
-		void out_jobj_array(int &nf, const char* key, _CLS& vals, _STROUT & sout)
+		void out_jobject(int& nf, const char* key, _CLS& val, _STROUT& sout)
+		{
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			sout.append(key).append("\":");
+			val.tojson(sout);
+		}
+
+		template<typename _CLS, typename _STROUT>
+		void out_jobj_array(int& nf, const char* key, _CLS& vals, _STROUT& sout)
 		{
 			if (nf)
 				sout.push_back(',');
@@ -663,7 +689,7 @@ namespace ec
 			sout.append(key).append("\":[");
 
 			int n = 0;
-			for (auto &obj : vals) {
+			for (auto& obj : vals) {
 				if (n)
 					sout.push_back(',');
 				obj.tojson(sout);
@@ -672,8 +698,8 @@ namespace ec
 			sout.push_back(']');
 		}
 
-		template<typename _STR, typename _STROUT>
-		void out_jstr_array(int &nf, const char* key, std::vector<_STR>& vals, _STROUT & sout)
+		template<typename _STR, typename _STROUT, class ALLOCATOR_ = std::allocator<_STR>>
+		void out_jstr_array(int& nf, const char* key, std::vector<_STR, ALLOCATOR_>& vals, _STROUT& sout)
 		{
 			if (nf)
 				sout.push_back(',');
@@ -682,7 +708,7 @@ namespace ec
 			sout.append(key).append("\":[");
 
 			int n = 0;
-			for (auto &obj : vals) {
+			for (auto& obj : vals) {
 				if (n)
 					sout.push_back(',');
 				sout.push_back('"');
@@ -693,8 +719,8 @@ namespace ec
 			sout.push_back(']');
 		}
 
-		template<typename _VAL, typename _STROUT>
-		void out_jnumber_array(int &nf, const char* key, std::vector<_VAL>& vals, _STROUT & sout)
+		template<typename _VAL, typename _STROUT, class ALLOCATOR_ = std::allocator<_VAL>>
+		void out_jnumber_array(int& nf, const char* key, std::vector<_VAL, ALLOCATOR_>& vals, _STROUT& sout)
 		{
 			if (nf)
 				sout.push_back(',');
@@ -703,7 +729,7 @@ namespace ec
 			sout.append(key).append("\":[");
 
 			int n = 0;
-			for (auto &v : vals) {
+			for (auto& v : vals) {
 				if (n)
 					sout.push_back(',');
 				sout.append(std::to_string(v));

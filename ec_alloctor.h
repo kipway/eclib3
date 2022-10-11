@@ -2,7 +2,7 @@
 \file ec_alloctor.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.4.29
+\update 2022.10.10
 
 memory
 	eclib memory allocator for ec::string, ec::hashmap, and other small objects etc.
@@ -19,22 +19,29 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include <stdio.h>
 #include <memory.h>
 #include <assert.h>
+
+#ifndef _WIN32
+#include <malloc.h>
+namespace ec {
+	struct glibc_noarena
+	{
+		glibc_noarena() {
+			mallopt(M_ARENA_MAX, 1);
+		}
+	};
+}
+#else
+namespace ec {
+	struct glibc_noarena
+	{
+	};
+}
+#endif
+#define DECLARE_EC_GLIBC_NOARENA ec::glibc_noarena g_ec_glibc_noarena;
+
 #include "ec_mutex.h"
-
-#ifndef EC_OBJ_TNY_SIZE
-#define EC_OBJ_TNY_SIZE 64
-#endif
-
-#ifndef EC_OBJ_SML_SIZE
-#define EC_OBJ_SML_SIZE 128
-#endif
-
-#ifndef EC_OBJ_MID_SIZE
-#define EC_OBJ_MID_SIZE 256
-#endif
-
-#ifndef EC_OBJ_BIG_SIZE
-#define EC_OBJ_BIG_SIZE 512
+#ifndef EC_ALLOCTOR_ALIGN
+#define EC_ALLOCTOR_ALIGN 8u
 #endif
 
 #ifndef EC_ALLOCTOR_HEAP_SIZE
@@ -47,26 +54,30 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #endif
 #endif
 
-#define DECLARE_EC_ALLOCTOR ec::selfalloctor g_ec_alloctor_self;\
-ec::selfalloctor* ec::p_ec_alloctor_self = &g_ec_alloctor_self;\
-ec::allocator g_ec_allocator(\
-	EC_OBJ_TNY_SIZE,(EC_ALLOCTOR_HEAP_SIZE/EC_OBJ_TNY_SIZE),\
-	EC_OBJ_SML_SIZE,(EC_ALLOCTOR_HEAP_SIZE/EC_OBJ_SML_SIZE),\
-	EC_OBJ_MID_SIZE,(EC_ALLOCTOR_HEAP_SIZE/EC_OBJ_MID_SIZE),\
-	EC_OBJ_BIG_SIZE,(EC_ALLOCTOR_HEAP_SIZE/EC_OBJ_BIG_SIZE));\
-ec::allocator* ec::p_ec_allocator = &g_ec_allocator;
+#ifndef EC_ALLOCTOR_HEAP_NUM
+#if defined(_MEM_TINY) // < 256M
+#define EC_ALLOCTOR_HEAP_NUM  9  //32-8K
+#elif defined(_MEM_SML) // < 1G
+#define EC_ALLOCTOR_HEAP_NUM  10 //64-32K
+#else
+#define EC_ALLOCTOR_HEAP_NUM  12 //64-128k
+#endif
+#endif
 
 #ifndef EC_ALLOCTOR_GC_MINHEAPS // start garbage collection min number of heaps
 #if defined(_MEM_TINY) // < 256M
 #define EC_ALLOCTOR_GC_MINHEAPS 2
 #elif defined(_MEM_SML) // < 1G
-#define EC_ALLOCTOR_GC_MINHEAPS 4
+#define EC_ALLOCTOR_GC_MINHEAPS 3
 #else
-#define EC_ALLOCTOR_GC_MINHEAPS 8
+#define EC_ALLOCTOR_GC_MINHEAPS 5
 #endif
 #endif
 
-#define EC_ALLOCTOR_ALIGN 8u
+#ifndef EC_SIZE_BLK_ALLOCATOR
+#define EC_SIZE_BLK_ALLOCATOR 16
+#endif
+
 namespace ec {
 	class null_lock final // null lock for map
 	{
@@ -89,7 +100,6 @@ namespace ec {
 		LOCK _lck;
 
 	public:
-
 		tinyalloc_()
 		{
 			t_blk* pblk;
@@ -140,16 +150,9 @@ namespace ec {
 			++_numfree;
 		}
 	};
+}// namespace ec
 
-#if defined(_MEM_TINY) // < 256M
-	using selfalloctor = tinyalloc_<64, 512, spinlock>; //32K
-#elif defined(_MEM_SML) // < 1G
-	using selfalloctor = tinyalloc_<64, 1024, spinlock>; //64k
-#else
-	using selfalloctor = tinyalloc_<64, 2048, spinlock>; //128k
-#endif
-	extern selfalloctor* p_ec_alloctor_self; //self use global memory allocator for memblk_, blk_alloctor
-
+namespace ec{
 	class memheap_ final // memory heap, memory blocks of the same size
 	{
 		struct t_blk
@@ -182,15 +185,8 @@ namespace ec {
 			return _palloc;
 		}
 
-		static void* operator new(size_t size)
-		{
-			return p_ec_alloctor_self->malloc_(size);
-		}
-
-		static void operator delete(void* p)
-		{
-			p_ec_alloctor_self->free_(p);
-		}
+		static void* operator new(size_t size);
+		static void operator delete(void* p);
 	public:
 		memheap_(void* palloc) :_numfree(0), _numblk(0), _sizeblk(0), _pmem(nullptr),
 			_phead(nullptr), _palloc(palloc), _pnext(nullptr)
@@ -291,15 +287,8 @@ namespace ec {
 			return _numfreeblks;
 		}
 
-		static void* operator new(size_t size)
-		{
-			return p_ec_alloctor_self->malloc_(size);
-		}
-
-		static void operator delete(void* p)
-		{
-			p_ec_alloctor_self->free_(p);
-		}
+		static void* operator new(size_t size);
+		static void operator delete(void* p);
 
 		blk_alloctor() :
 			_phead(nullptr),
@@ -412,7 +401,8 @@ namespace ec {
 			_lck.lock();
 			pheap->free_(p);
 			_numfreeblks++;
-			if (_numheaps > EC_ALLOCTOR_GC_MINHEAPS && pheap->canfree() && pheap != _phead)
+			if (_numheaps > EC_ALLOCTOR_GC_MINHEAPS && pheap->canfree() && pheap != _phead 
+				&& _numfreeblks % (int32_t)_numblksperheap)
 				gc_();
 			_lck.unlock();
 			return true;
@@ -460,8 +450,9 @@ namespace ec {
 	protected:
 		using PA_ = blk_alloctor<spinlock>*;
 		unsigned int _size;
-		PA_ _alloctors[8];
+		PA_ _alloctors[EC_SIZE_BLK_ALLOCATOR];
 
+	public:
 		bool add_alloctor(size_t sizeblk, size_t numblk)
 		{
 			if (_size == sizeof(_alloctors) / sizeof(PA_))
@@ -475,12 +466,16 @@ namespace ec {
 			return true;
 		}
 	public:
+		allocator() :_size(0) {
+		}
+
 		allocator(size_t sizetiny, size_t numtiny,
 			size_t sizesml = 0, size_t numsml = 0,
 			size_t sizemid = 0, size_t nummid = 0,
 			size_t sizelg = 0, size_t numlg = 0
 		) :_size(0) {
-			add_alloctor(sizetiny, numtiny);
+			if (sizetiny && numtiny)
+				add_alloctor(sizetiny, numtiny);
 			if (sizesml && numsml)
 				add_alloctor(sizesml, numsml);
 			if (sizemid && nummid)
@@ -488,6 +483,7 @@ namespace ec {
 			if (sizelg && numlg)
 				add_alloctor(sizelg, numlg);
 		}
+
 		~allocator() {
 			for (auto i = 0u; i < _size; i++) {
 				if (_alloctors[i]) {
@@ -497,17 +493,16 @@ namespace ec {
 			}
 			_size = 0;
 		}
+
 		size_t maxblksize()
 		{
-			if (!_size)
-				return 0;
-			return _alloctors[_size - 1]->sizeblk();
+			return 0u == _size ? 0 : _alloctors[_size - 1]->sizeblk();
 		}
 
 		void* malloc_(size_t size, size_t* psize = nullptr)
 		{
 			void* pret = nullptr;
-			if (size > EC_OBJ_BIG_SIZE) { // malloc from system
+			if (size > maxblksize()) { // malloc from system
 				pret = ::malloc(size + EC_ALLOCTOR_ALIGN);
 				if (!pret)
 					return nullptr;
@@ -526,8 +521,39 @@ namespace ec {
 			return pret;
 		}
 
+		void* realloc_(void* ptr, size_t size, size_t* poutsize = nullptr)
+		{
+			if (!ptr) { // malloc
+				if (!size)
+					return nullptr;
+				return malloc_(size, poutsize);
+			}
+			if (!size) { // free
+				free_(ptr);
+				return nullptr;
+			}
+			memheap_** pheap = (memheap_**)(reinterpret_cast<char*>(ptr) - EC_ALLOCTOR_ALIGN);
+			if (!*pheap) { // system malloc
+				void* pret = ::realloc(pheap, size + EC_ALLOCTOR_ALIGN);
+				if (poutsize)
+					*poutsize = size;
+				return reinterpret_cast<char*>(pret) + EC_ALLOCTOR_ALIGN;
+			}
+			size_t sizeorg = (*pheap)->sizeblk();
+			if (sizeorg >= size)
+				return ptr;
+			char* pnew = (char*)malloc_(size, poutsize);
+			if (!pnew)
+				return nullptr;
+			memcpy(pnew, ptr, sizeorg);
+			free_(ptr);
+			return pnew;
+		}
+
 		void free_(void* p)
 		{
+			if (!p)
+				return;
 			memheap_** pheap = (memheap_**)(reinterpret_cast<char*>(p) - EC_ALLOCTOR_ALIGN);
 			if (!*pheap) { // system malloc
 				::free(pheap);
@@ -547,6 +573,301 @@ namespace ec {
 			printf("}\n\n");
 		}
 	};
-	extern ec::allocator* p_ec_allocator;
+
+	constexpr size_t zbaseobjsize = sizeof(memheap_) > sizeof(blk_alloctor<spinlock>) ? sizeof(memheap_) : sizeof(blk_alloctor<spinlock>);
+	constexpr size_t zselfblksize = (zbaseobjsize % 8u) ? zbaseobjsize + 8u - zbaseobjsize % 8u : zbaseobjsize;
+
+#ifndef EC_ALLOCATOR_SELF_SIZE
+#if defined(_MEM_TINY) // < 256M
+	using selfalloctor = tinyalloc_<zselfblksize, 512, spinlock>; //32K
+#elif defined(_MEM_SML) // < 1G
+	using selfalloctor = tinyalloc_<zselfblksize, 1024, spinlock>; //64k
+#else
+	using selfalloctor = tinyalloc_<zselfblksize, 2048, spinlock>; //128k
+#endif
+#else
+	using selfalloctor = tinyalloc_<zselfblksize, EC_ALLOCATOR_SELF_SIZE, spinlock>;
+#endif
 }//ec
 
+ec::selfalloctor* get_ec_alloctor_self(); //self use global memory allocator for memblk_, blk_alloctor
+
+#define DECLARE_EC_ALLOCTOR ec_allocator_ g_ec_allocator;\
+inline ec::selfalloctor* get_ec_alloctor_self() { return &g_ec_allocator._alloctor_self; }\
+inline ec::allocator* get_ec_allocator() { return &g_ec_allocator._alloctor; }\
+void* ec::memheap_::operator new(size_t size){\
+	return get_ec_alloctor_self()->malloc_(size);\
+}\
+void ec::memheap_::operator delete(void* p){\
+	get_ec_alloctor_self()->free_(p);\
+}\
+template<class LOCK>\
+ void* ec::blk_alloctor<LOCK>::operator new(size_t size){\
+	 return get_ec_alloctor_self()->malloc_(size);\
+ }\
+ template<class LOCK>\
+ void ec::blk_alloctor<LOCK>::operator delete(void* p) {\
+	 get_ec_alloctor_self()->free_(p);\
+ }
+
+ec::allocator* get_ec_allocator();
+class ec_allocator_ {
+public:
+	ec_allocator_() {
+#if defined(_MEM_TINY) // < 256M
+		size_t zbase = 32;
+#else
+		size_t zbase = 64;
+#endif
+		for (int i = 0; i < EC_ALLOCTOR_HEAP_NUM && i < EC_SIZE_BLK_ALLOCATOR; i++) {
+			if(i < 2)
+				_alloctor.add_alloctor(zbase - EC_ALLOCTOR_ALIGN, EC_ALLOCTOR_HEAP_SIZE / zbase);
+			else
+				_alloctor.add_alloctor(zbase + i * 8u, EC_ALLOCTOR_HEAP_SIZE / zbase);
+			zbase *= 2u;
+		}
+	}
+	ec::selfalloctor _alloctor_self;
+	ec::allocator _alloctor;
+};
+
+namespace ec {
+	// allocator for std containers
+	template <class _Ty>
+	class std_allocator
+	{
+	public:
+		using value_type = _Ty;
+		using pointer = _Ty*;
+		using reference = _Ty&;
+		using const_pointer = const _Ty*;
+		using const_reference = const _Ty&;
+		using size_type = size_t;
+		using difference_type = ptrdiff_t;
+
+		std_allocator() noexcept {
+		}
+
+		std_allocator(const std_allocator& alloc) noexcept {
+		}
+
+		template <class U>
+		std_allocator(const std_allocator<U>& alloc) noexcept {
+		}
+		~std_allocator() {
+		}
+
+		template <class _Other>
+		struct  rebind {
+			using other = std_allocator<_Other>;
+		};
+
+		pointer address(reference x) const noexcept {
+			return &x;
+		}
+
+		const_pointer address(const_reference x) const noexcept {
+			return &x;
+		}
+
+		pointer allocate(size_type n, const void* hint = 0) {
+			return (pointer)get_ec_allocator()->malloc_(sizeof(value_type) * n);
+		}
+
+		void deallocate(pointer p, size_type n) {
+			get_ec_allocator()->free_(p);
+		}
+
+		size_type max_size() const noexcept {
+			return size_t(-1) / sizeof(value_type);
+		};
+
+		void construct(pointer p, const_reference val) {
+			new ((void*)p) value_type(val);
+		}
+
+		template <class _Objty, class... _Types>
+		void construct(_Objty* _Ptr, _Types&&... _Args) {
+			new ((void*)_Ptr) _Objty(std::forward<_Types>(_Args)...);
+		}
+
+		template <class _Uty>
+		void destroy(_Uty* const _Ptr) {
+			_Ptr->~_Uty();
+		}
+	};
+
+	template <>
+	class std_allocator<void> {
+	public:
+		using value_type = void;
+		typedef void* pointer;
+		typedef const void* const_pointer;
+
+		template <class _Other>
+		struct  rebind {
+			using other = std_allocator<_Other>;
+		};
+	};
+
+	template <class _Ty, class _Other>
+	bool operator==(const std_allocator<_Ty>&, const std_allocator<_Other>&) noexcept {
+		return true;
+	}
+
+	template <class _Ty, class _Other>
+	bool operator!=(const std_allocator<_Ty>&, const std_allocator<_Other>&) noexcept {
+		return false;
+	}
+
+} // namespace ec
+
+/*
+// tstmem.cpp 
+// test ec_allocator
+// g++ -O2 -pthread -I../eclib3 -std=c++11  -otstmem tstmem.cpp
+// at intel N6005 ubuntu server 22.04 G++ 11.20
+// ec_queue(us) : create =  1886928, delete =  863805, sum =  2750733, total =  2750989
+// mem_queue(us): create =  2529579, delete = 1058470, sum =  3588049, total =  3588315
+// std_queue(us): create =  2740759, delete = 1227592, sum =  3968351, total =  3968493
+// 
+// windows 11, i5-12500T, VS2022 x64 release
+// ec_queue(us) : create =  2709310, delete = 1243576, sum =  3952886, total =  3952886
+// mem_queue(us): create =  2617739, delete = 1090900, sum =  3708639, total =  3708639
+// std_queue(us): create =  4407928, delete = 1276998, sum =  5684926, total =  5684926
+
+#include "ec_system.h"
+#define EC_ALLOCTOR_HEAP_SIZE (4 * 1024 * 1024) // 4M heap size
+#include "ec_alloctor.h"
+DECLARE_EC_GLIBC_NOARENA
+DECLARE_EC_ALLOCTOR
+
+#include <queue>
+#include <string>
+
+#include "ec_string.h"
+#include "ec_queue.h"
+#include "ec_time.h"
+
+template<class STR_ = std::string>
+class cnode
+{
+public:
+	int _x;
+	int _y;
+	STR_ _str;
+	STR_ _str2;
+	STR_ _str3;
+	cnode() :_x(0), _y(0) {
+
+	}
+	cnode(int x, int y, const char* s) :_x(x), _y(y) {
+		_str.assign(s);
+		_str2.assign(s);
+		_str3.assign(s);
+		_str[0] = '1' + x % 9;
+		_str2[0] = '2' + x % 9;
+		_str3[0] = '3' + x % 9;
+	}
+};
+
+using memstr_ = std::basic_string<char, std::char_traits<char>, ec::std_allocator<char>>;
+using std_queue = std::queue< cnode<>, std::deque<cnode<>>>;
+using mem_queue = std::queue< cnode<memstr_>, std::deque<cnode<memstr_>, ec::std_allocator<cnode<memstr_>> > >;
+using ec_queue = ec::queue<cnode<ec::string>>;
+
+#define size_objs (1024 * 8)
+const char* g_str = "DECLARE_EC_GLIBC_NOARENA+DECLARE_EC_GLIBC_NOARENA+DECLARE_EC_GLIBC_NOARENA";
+class tst_queue
+{
+public:
+	std::vector<std::string> _strs;
+	tst_queue()
+	{
+		_strs.reserve(size_objs);
+		for (int i = 0; i < size_objs; i++) {
+			std::string s = g_str;
+			s.append(std::to_string(i));
+			_strs.push_back(std::move(s));
+		}
+	}
+
+	template<class QU_>
+	int64_t createobj(QU_& qu)
+	{
+		int64_t t1 = ec::time_ns(), t2 = 0;
+		for (int i = 0; i < size_objs; i++) {
+			qu.emplace(i, i + 1, _strs[i].c_str());
+		}
+		t2 = ec::time_ns();
+		return t2 - t1;
+	}
+
+	template<class QU_>
+	int64_t deleteobj(QU_& qu)
+	{
+		int64_t t1 = ec::time_ns(), t2 = 0;
+		while (!qu.empty()) {
+			qu.pop();
+		}
+		t2 = ec::time_ns();
+		return t2 - t1;
+	}
+
+#define LOOP_NUM 2000
+	void test()
+	{
+		ec_queue  ecq;
+		mem_queue memq;
+		std_queue stdq;
+
+		int64_t t1, t2, tt1, tt2;
+
+		t1 = 0;
+		t2 = 0;
+		tt1 = ec::time_ns();
+		for (auto i = 0; i < LOOP_NUM; i++) {
+			t1 += createobj(ecq);
+			t2 += deleteobj(ecq);
+		}
+		tt2 = ec::time_ns();
+		printf("ec_queue(us) : create = %8jd, delete =%8jd, sum = %8jd, total = %8jd\n", t1, t2, t1 + t2, tt2 - tt1);
+#ifdef _WIN32
+		Sleep(1000);
+#else
+		sleep(1);
+#endif
+
+		t1 = 0;
+		t2 = 0;
+		tt1 = ec::time_ns();
+		for (auto i = 0; i < LOOP_NUM; i++) {
+			t1 += createobj(memq);
+			t2 += deleteobj(memq);
+		}
+		tt2 = ec::time_ns();
+		printf("mem_queue(us): create = %8jd, delete =%8jd, sum = %8jd, total = %8jd\n", t1, t2, t1 + t2, tt2 - tt1);
+#ifdef _WIN32
+		Sleep(1000);
+#else
+		sleep(1);
+#endif
+
+		t1 = 0;
+		t2 = 0;
+		tt1 = ec::time_ns();
+		for (auto i = 0; i < LOOP_NUM; i++) {
+			t1 += createobj(stdq);
+			t2 += deleteobj(stdq);
+		}
+		tt2 = ec::time_ns();
+		printf("std_queue(us): create = %8jd, delete =%8jd, sum = %8jd, total = %8jd\n", t1, t2, t1 + t2, tt2 - tt1);
+	}
+};
+
+int main()
+{
+	tst_queue qu;
+	qu.test();
+	return 0;
+}*/

@@ -2,7 +2,7 @@
 \file ec_system.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2022.5.26
 
 eclib, easy C/C++ Library,based on C++11
 
@@ -43,6 +43,8 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #	include <termios.h>
 #	include <unistd.h>
 
+#define _tzset tzset
+
 #ifndef SOCKET
 #	define SOCKET int
 #endif
@@ -75,3 +77,4 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 
 #include <cstdlib>
 #include <cstdio>
+#include <cstdint>

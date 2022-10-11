@@ -2,7 +2,7 @@
 \file ec_protobuf.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.8.3
+\update 2022.10.9
 
 classes to encode/decode google protocol buffer,support proto3
 
@@ -591,7 +591,7 @@ namespace ec
 
 		const char* getlasterrstr()
 		{
-			const char* sret = nullptr;
+			const char* sret = "unknown";
 			switch (_lasterr) {
 			case pberr_ok:
 				sret = "";
@@ -636,28 +636,28 @@ namespace ec
 			return size_content();
 		}
 
-		template<class _OBJ>
-		size_t size_obj_array(int objid, std::vector<_OBJ> &vs)
+		template<class _OBJ, class ALLOCATOR_ = std::allocator<_OBJ>>
+		size_t size_obj_array(int objid, std::vector<_OBJ, ALLOCATOR_>& vs)
 		{
 			size_t zu = 0;
-			for (auto &i : vs) {
+			for (auto& i : vs) {
 				zu += i.size(objid);
 			}
 			return zu;
 		}
 
-		template<class _OBJ>
-		bool out_obj_array(_Out * pout, int objid, std::vector<_OBJ> &vs)
+		template<class _OBJ, class ALLOCATOR_ = std::allocator<_OBJ>>
+		bool out_obj_array(_Out* pout, int objid, std::vector<_OBJ, ALLOCATOR_>& vs)
 		{
-			for (auto &i : vs) {
+			for (auto& i : vs) {
 				if (!i.serialize(objid, pout))
 					return false;
 			}
 			return true;
 		}
 
-		template<class _OBJ>
-		bool parse_obj_array(const void* pdata, size_t sizedata, std::vector<_OBJ> &vs) {
+		template<class _OBJ, class ALLOCATOR_ = std::allocator<_OBJ>>
+		bool parse_obj_array(const void* pdata, size_t sizedata, std::vector<_OBJ, ALLOCATOR_>& vs) {
 			_OBJ t;
 			bool bret = t.parse(pdata, sizedata);
 			if (bret)

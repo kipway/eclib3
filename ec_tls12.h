@@ -2,7 +2,7 @@
 \file ec_tls12.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.2.8
+\update 2022.10.1
 
 TLS1.2(rfc5246)  session class
 
@@ -22,7 +22,7 @@ tls_session_cli
 tls_session_srv
 	session class for server
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -86,27 +86,68 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #endif
 namespace ec
 {
-	template<class _Out>
-	bool get_cert_pkey(const char* filecert, _Out* pout)//get ca public key
+	template<class _strOut>
+	bool load_certfile(const char* filecert, _strOut& out)
 	{
-		uint8_t stmp[8192];
+		out.clear();
+		unsigned char stmp[4096];
 		FILE* pf = fopen(filecert, "rb");
 		if (!pf)
 			return false;
 		size_t size;
-		size = fread(stmp, 1, sizeof(stmp), pf);
+		using ctype = typename _strOut::value_type;
+		while (!feof(pf)) {
+			size = fread(stmp, 1, sizeof(stmp), pf);
+			out.assign((const ctype*)stmp, size);
+		}
 		fclose(pf);
-		if (size >= sizeof(stmp))
+		return out.size() > 5u;
+	}
+
+	template<class _strOut>
+	bool x509toDer(X509* px509, _strOut& out)
+	{
+		int len;
+		unsigned char* buf, * pdobuf;
+		len = i2d_X509(px509, nullptr);
+		if (len < 0)
 			return false;
-		X509* _px509;
-		const unsigned char* p = stmp;
-		_px509 = d2i_X509(0, &p, (long)size);//only use first Certificate
-		if (!_px509)
+		buf = (unsigned char*)::malloc(len + 1);
+		pdobuf = buf;
+		if (i2d_X509(px509, &pdobuf) < 0) {
+			::free(buf);
+			return false;
+		}
+		out.clear();
+		using ctype = typename _strOut::value_type;
+		out.assign((const ctype*)buf, len);
+		::free(buf);
+		return true;
+	}
+
+	template<class _Out>
+	bool get_cert_pkey(const char* filecert, _Out* pout)//get ca public key bitstr
+	{
+		std::string cert;
+		if (!load_certfile(filecert, cert))
+			return false;
+		X509* px509 = nullptr;
+		if (!memcmp("-----", cert.data(), 5)) { // pem
+			BIO* bioPub = BIO_new_mem_buf(cert.data(), (int)cert.size());
+			px509 = PEM_read_bio_X509(bioPub, nullptr, nullptr, nullptr);
+			BIO_free(bioPub);
+		}
+		else { // der
+			const unsigned char* p = (const unsigned char*)cert.data();
+			px509 = d2i_X509(nullptr, &p, (long)cert.size());
+		}
+		if (!px509)
 			return false;
 		pout->clear();
-		pout->append(X509_get0_pubkey_bitstr(_px509)->data, (size_t)X509_get0_pubkey_bitstr(_px509)->length);
-
-		X509_free(_px509);
+		using ctype = typename _Out::value_type;
+		ASN1_BIT_STRING* pbitstr = X509_get0_pubkey_bitstr(px509);
+		pout->assign((const ctype*)pbitstr->data, (size_t)pbitstr->length);
+		X509_free(px509);
 		return true;
 	}
 
@@ -204,20 +245,19 @@ namespace ec
 				_ucid(ucid), _bserver(bserver), _breadcipher(false), _bsendcipher(false), _seqno_send(0), _seqno_read(0), _cipher_suite(0),
 				_pkgtcp(pmem), _bhandshake_finished(false)
 			{
-				_pkgtcp.reserve(1024 * 20);
 				_key_swmac[0] = 0;
 				_keyblock[0] = 0;
 				_serverrand[0] = 0;
 				resetblks();
 				_hmsg = handshake::new_cls(_pmem);
 			};
-
+			
 			session(session*p) : _pmem(p->_pmem), _plog(p->_plog), _ucid(p->_ucid), _bserver(p->_bserver), _breadcipher(p->_breadcipher),
 				_bsendcipher(p->_bsendcipher), _seqno_send(p->_seqno_send), _seqno_read(p->_seqno_read), _cipher_suite(p->_cipher_suite),
 				_pkgtcp(p->_pmem), _bhandshake_finished(p->_bhandshake_finished)
 			{
-				_pkgtcp.clear();
-				_pkgtcp.append(p->_pkgtcp.data(), p->_pkgtcp.size());
+				_pkgtcp.free();
+				_pkgtcp.append(p->_pkgtcp.data_(), p->_pkgtcp.size_());
 
 				memcpy(_keyblock, p->_keyblock, sizeof(_keyblock));
 				memcpy(_key_cwmac, p->_key_cwmac, sizeof(_key_cwmac));
@@ -280,7 +320,7 @@ namespace ec
 			uint64_t _seqno_send, _seqno_read;
 			uint16_t _cipher_suite;
 
-			bytes _pkgtcp;
+			parsebuffer _pkgtcp;
 
 			uint8_t _keyblock[256], _key_cwmac[32], _key_swmac[32];// client_write_MAC_key,server_write_MAC_key
 			uint8_t _key_cw[32], _key_sw[32];   // client_write_key,server_write_key
@@ -555,7 +595,7 @@ namespace ec
 				_seqno_read = 0;
 				_cipher_suite = 0;
 
-				_pkgtcp.clear();
+				_pkgtcp.free();
 				if (_hmsg)
 					_hmsg->clear();
 				else
@@ -658,9 +698,9 @@ namespace ec
 			int  OnTcpRead(const void* pd, size_t size, _Out* pout) // return TLS_SESSION_XXX
 			{
 				_pkgtcp.append((const uint8_t*)pd, size);
-				uint8_t *p = _pkgtcp.data(), uct, tmp[tls_rec_fragment_len + 2048];
+				uint8_t *p = (uint8_t*)_pkgtcp.data_(), uct, tmp[tls_rec_fragment_len + 2048];
 				uint16_t ulen;
-				int nl = (int)_pkgtcp.size(), nret = TLS_SESSION_NONE, ndl = 0;
+				int nl = (int)_pkgtcp.size_(), nret = TLS_SESSION_NONE, ndl = 0;
 				while (nl >= 5) { // type(1byte) version(2byte) length(2byte);
 					uct = *p;
 					ulen = p[3];
@@ -703,8 +743,7 @@ namespace ec
 					nl -= (int)ulen + 5;
 					p += (int)ulen + 5;
 				}
-				_pkgtcp.erase(0, _pkgtcp.size() - nl);
-				_pkgtcp.shrink_to_fit();
+				_pkgtcp.freehead(_pkgtcp.size_() - nl);
 				return nret;
 			}
 		protected:
@@ -755,10 +794,10 @@ namespace ec
 
 			bool SetServerCa(const char* scafile)
 			{
-				array<uint8_t, 8192> pkey;
+				std::string pkey;
 				if (!get_cert_pkey(scafile, &pkey))
 					return false;
-				return SetServerPubkey((int)pkey.size(), pkey.data());
+				return SetServerPubkey((int)pkey.size(), (const unsigned char*)pkey.data());
 			}
 
 			virtual void Reset()
@@ -860,21 +899,9 @@ namespace ec
 				if (!_px509)
 					return false;
 
-				if (_pubkeylen) { // need to verify the server legitimacy
-					bool bok = true;
-					int i;
+				if (_pubkeylen) { // verify the server legitimacy
 					ASN1_BIT_STRING * pstr = X509_get0_pubkey_bitstr(_px509);
-					if (pstr->length != _pubkeylen)
-						bok = false;
-					else {
-						for (i = 0; i < pstr->length; i++) {
-							if (pstr->data[i] != _pubkey[i]) {
-								bok = false;
-								break;
-							}
-						}
-					}
-					if (!bok) {
+					if (pstr->length != _pubkeylen || memcmp(pstr->data, _pubkey, _pubkeylen)) {
 						X509_free(_px509);
 						_px509 = nullptr;
 						return false;
@@ -887,7 +914,7 @@ namespace ec
 					_px509 = nullptr;
 					return false;
 				}
-				_prsa = EVP_PKEY_get1_RSA(_pevppk);
+				_prsa = EVP_PKEY_get1_RSA(_pevppk);//get copy of RSA
 				if (!_prsa) {
 					EVP_PKEY_free(_pevppk);
 					X509_free(_px509);
@@ -1047,8 +1074,8 @@ namespace ec
 				_pRsaLck = pRsaLck;
 				_pRsaPrivate = pRsaPrivate;
 				memset(_sip, 0, sizeof(_sip));
-				_pkgm.reserve(TLS_REC_BUF_SIZE);
 			}
+
 			sessionserver(sessionserver*p) : session(p), _pkgm(p->_pmem)
 			{
 				_pRsaLck = p->_pRsaLck;
@@ -1060,9 +1087,9 @@ namespace ec
 				_cerrootlen = p->_cerrootlen;
 				memcpy(_sip, p->_sip, sizeof(_sip));
 
-				_pkgm.reserve(TLS_REC_BUF_SIZE);
-				_pkgm.append(p->_pkgm.data(), p->_pkgm.size());
+				_pkgm.append(p->_pkgm.data_(), p->_pkgm.size_());
 			}
+
 			sessionserver(sessionserver&& v) : session(std::move(v)), _pkgm(std::move(v._pkgm))
 			{
 				_pRsaLck = v._pRsaLck;
@@ -1088,7 +1115,7 @@ namespace ec
 			size_t _cerrootlen;
 			char _sip[32];
 		private:
-			bytes _pkgm;
+			parsebuffer _pkgm;// for handshake
 		public:
 			inline void SetIP(const char* sip)
 			{
@@ -1381,8 +1408,8 @@ namespace ec
 			int dohandshakemsg(const uint8_t* prec, size_t sizerec, _Out* po)
 			{
 				_pkgm.append((const unsigned char*)prec, sizerec);
-				int nl = (int)_pkgm.size(), nret = TLS_SESSION_NONE;
-				unsigned char* p = _pkgm.data();
+				int nl = (int)_pkgm.size_(), nret = TLS_SESSION_NONE;
+				unsigned char* p = (unsigned char*)_pkgm.data_();
 				while (nl >= 4) {
 					uint32_t ulen = p[1];
 					ulen = (ulen << 8) + p[2];
@@ -1432,8 +1459,10 @@ namespace ec
 					nl -= (int)ulen + 4;
 					p += (int)ulen + 4;
 				}
-				_pkgm.erase(0, _pkgm.size() - nl);
-				_pkgm.shrink_to_fit();
+				if (TLS_SESSION_HKOK == nret)
+					_pkgm.free();
+				else
+					_pkgm.freehead(_pkgm.size_() - nl);
 				return nret;
 			}
 		};
@@ -1441,91 +1470,84 @@ namespace ec
 		class srvca
 		{
 		public:
-			RSA * _pRsaPub;
+			RSA* _pRsaPub;
 			RSA* _pRsaPrivate;
 
-			EVP_PKEY *_pevppk;
-			X509* _px509;
-
-			std::bytes _pcer;
-			std::bytes _prootcer;
+			std::string _pcer;
+			std::string _prootcer;
 
 			std::mutex _csRsa;
 		public:
-			srvca() : _pRsaPub(nullptr), _pRsaPrivate(nullptr), _pevppk(nullptr), _px509(nullptr)
+			srvca() : _pRsaPub(nullptr), _pRsaPrivate(nullptr)
 			{
 				_pcer.reserve(4096);
 				_prootcer.reserve(8192);
 			}
-			~srvca()
-			{
+			void clear() {
 				if (_pRsaPrivate)
 					RSA_free(_pRsaPrivate);
 				if (_pRsaPub)
 					RSA_free(_pRsaPub);
-				if (_pevppk)
-					EVP_PKEY_free(_pevppk);
-				if (_px509)
-					X509_free(_px509);
 				_pRsaPub = nullptr;
 				_pRsaPrivate = nullptr;
-				_pevppk = nullptr;
-				_px509 = nullptr;
+			}
+			~srvca()
+			{
+				clear();
 			}
 			bool InitCert(const char* filecert, const char* filerootcert, const char* fileprivatekey)
 			{
-				unsigned char stmp[4096];
-				FILE* pf = fopen(filecert, "rb");
-				if (!pf)
+				clear();
+				if (!load_certfile(filecert, _pcer))
 					return false;
-				size_t size;
-				_pcer.clear();
-				_prootcer.clear();
-				while (!feof(pf)) {
-					size = fread(stmp, 1, sizeof(stmp), pf);
-					_pcer.append(stmp, size);
-				}
-				fclose(pf);
-
 				if (filerootcert && *filerootcert) {
-					pf = fopen(filerootcert, "rb");
-					if (!pf)
+					if (!load_certfile(filerootcert, _prootcer))
 						return false;
-
-					while (!feof(pf)) {
-						size = fread(stmp, 1, sizeof(stmp), pf);
-						_prootcer.append(stmp, size);
-					}
-					fclose(pf);
 				}
 
-				pf = fopen(fileprivatekey, "rb");
+				FILE* pf = fopen(fileprivatekey, "rb");
 				if (!pf)
 					return false;
-
-				_pRsaPrivate = PEM_read_RSAPrivateKey(pf, 0, nullptr, nullptr);
+				_pRsaPrivate = PEM_read_RSAPrivateKey(pf, nullptr, nullptr, nullptr);
 				fclose(pf);
-
-				const unsigned char* p = _pcer.data();
-				_px509 = d2i_X509(nullptr, &p, (long)_pcer.size());//only use first Certificate
-				if (!_px509)
-					return false;
-
-				_pevppk = X509_get_pubkey(_px509);
-				if (!_pevppk) {
-					X509_free(_px509);
-					_px509 = nullptr;
+				if (!_pRsaPrivate) {
 					return false;
 				}
-				_pRsaPub = EVP_PKEY_get1_RSA(_pevppk);
-				if (!_pRsaPub) {
-					EVP_PKEY_free(_pevppk);
-					X509_free(_px509);
-					_pevppk = nullptr;
-					_px509 = nullptr;
-					return false;
-				}
-				return true;
+				bool bresult = false;
+				EVP_PKEY* pevppk = nullptr;
+				X509* px509 = nullptr;
+				do {
+					if (!memcmp("-----", _pcer.data(), 5)) { // pem
+						BIO* bioPub = BIO_new_mem_buf(_pcer.c_str(), (int)_pcer.size());
+						px509 = PEM_read_bio_X509(bioPub, nullptr, nullptr, nullptr);
+						BIO_free(bioPub);
+						if (!px509)
+							break;
+						if (!x509toDer(px509, _pcer))
+							break;
+					}
+					else { // der
+						const unsigned char* p = (const unsigned char*)_pcer.data();
+						px509 = d2i_X509(nullptr, &p, (long)_pcer.size());
+						if (!px509)
+							break;;
+					}
+					pevppk = X509_get_pubkey(px509);
+					if (!pevppk)
+						break;
+					_pRsaPub = EVP_PKEY_get1_RSA(pevppk); //get copy of RSA public key
+					if (!_pRsaPub)
+						break;
+					bresult = true;
+				} while (0);
+
+				if(pevppk)
+					EVP_PKEY_free(pevppk);
+				if(px509)
+					X509_free(px509);
+				if (!bresult)
+					clear();
+				return bresult;
 			}
 		};
 	}// tls

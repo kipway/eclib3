@@ -2,11 +2,11 @@
 \file ec_netio.h
 \author	jiangyong
 \email  kipway@outlook.com
-update 2022.3.9
+update 2022.8.25
 
 functions for NET IO
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway/eclib
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -176,6 +176,9 @@ namespace ec
 			setsockopt(s, SOL_TCP, TCP_KEEPIDLE, (void*)&keepIdle, sizeof(keepIdle));
 			setsockopt(s, SOL_TCP, TCP_KEEPINTVL, (void *)&keepInterval, sizeof(keepInterval));
 			setsockopt(s, SOL_TCP, TCP_KEEPCNT, (void *)&keepCount, sizeof(keepCount));
+
+			unsigned int tcp_timeout = bfast ? 15000 : 30000; //15/30 seconds before aborting a write()
+			setsockopt(s, SOL_TCP, TCP_USER_TIMEOUT, &tcp_timeout, sizeof(unsigned int));
 			return true;
 		}
 #else
@@ -271,6 +274,7 @@ namespace ec
 				}
 #endif
 			}
+			return s;
 		}
 
 #ifndef _WIN32
@@ -568,15 +572,14 @@ namespace ec
 
 				if ((ss.size() > 2) && (*(ss[2]._str - 1) == ':')) {
 					_port = ss[2].stoi();
-					if (ss.size() > 3)
-						_path.append(ss[3]._str, urlsize);
-
+					if(ss.size() > 3)
+						_path.append(ss[3]._str, urlsize - (ss[3]._str - surl));
 					if (!_port)
 						return false;
 				}
 				else {
 					_port = 0;
-					_path.append(ss[2]._str, urlsize);
+					_path.append(ss[2]._str, urlsize - (ss[2]._str - surl));
 				}
 				size_t apos = _path.find_first_of('?');
 				if (std::string::npos != apos) {
