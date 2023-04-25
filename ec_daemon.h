@@ -2,12 +2,14 @@
 \file ec_daemon.h
 \author	jiangyong
 \author kipway@outlook.com
-\update 2020.9.6
+\update
+
+2023.2.13 add run in console
 
 daemon
 	a class  for linux daemon server
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -124,7 +126,7 @@ namespace ec
 			}
 			int CheckLock()//return -1:error;  0: success, not lock; >0 : the pid locked
 			{
-				m_nlockfile = open(m_sfile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+				m_nlockfile = open(m_sfile, O_RDWR | O_CREAT | O_CLOEXEC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 				if (m_nlockfile < 0)
 					return -1;
 				struct flock fl;
@@ -160,7 +162,7 @@ namespace ec
 			}
 			static  int GetLockPID(const char *spidfile)//get lock PID. ret -1:err; 0:not lock; >0 PID;
 			{
-				int nlockfile = open(spidfile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+				int nlockfile = open(spidfile, O_RDWR | O_CREAT | O_CLOEXEC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 				if (nlockfile < 0)
 					return -1;
 				struct flock fl;
@@ -172,7 +174,7 @@ namespace ec
 					close(nlockfile);
 					return -1;
 				}
-				if (fl.l_type == F_UNLCK) { //not lock                
+				if (fl.l_type == F_UNLCK) { //not lock
 					close(nlockfile);
 					return 0;
 				}
@@ -190,11 +192,8 @@ namespace ec
 		char _spidfile[512];
 		char _sDaemon[512];
 		char _sVer[512];
-	private:
-		std::atomic_bool _bstop;
-		std::atomic_bool _brun;
 	public:
-		daemon() : _pcls(nullptr), _bstop(false), _brun(false)
+		daemon() : _pcls(nullptr)
 		{
 			memset(_spidfile, 0, sizeof(_spidfile));
 			memset(_sDaemon, 0, sizeof(_sDaemon));
@@ -225,15 +224,7 @@ namespace ec
 			dup2(fd, 2);
 			close(fd);
 		}
-		
-		void stopmain()
-		{
-			while (_brun) {
-				_bstop = true;
-				usleep(50 * 1000);
-			}
-			_bstop = false;
-		}
+
 		void stopcls()
 		{
 			if(_pcls)
@@ -242,8 +233,8 @@ namespace ec
 		}
 		static void exithandler(int ns)
 		{
+			printf("exit signal %d.\n",ns);
 			if (daemon<_CLS>::_pdaemon) {
-				daemon<_CLS>::_pdaemon->stopmain();
 				daemon<_CLS>::_pdaemon->stopcls();
 				daemon<_CLS>::_pdaemon = nullptr; //not free memery,exit will release the memory
 			}
@@ -270,12 +261,10 @@ namespace ec
 				cIpcMsg msg(_msgkey); // send
 				char smsg[512] = { 0 };
 
-				int i, n = 30, nm = 0;
-				for (i = 0; i < n; i++)
-				{
-					sleep(1);
-					if (msg.rcv(smsg, sizeof(smsg)) > 0)
-					{
+				int i, n = 300, nm = 0;
+				for (i = 0; i < n; i++) {
+					usleep(100 * 1000); //100ms
+					if (msg.rcv(smsg, sizeof(smsg)) > 0) {
 						printf("%s", smsg);
 						fflush(stdout);
 						if (!strcasecmp("finished", smsg)) {
@@ -284,8 +273,8 @@ namespace ec
 						}
 						nm++;
 					}
-					if (!nm && i > 5)
-						n = 10;
+					if (!nm && i > 100)
+						n = 150; // if has no msg in 10 seconds, will break after 15 seconds
 				}
 				msg.del();
 				CloseIO();
@@ -294,8 +283,7 @@ namespace ec
 			else {
 				cIpcMsg msg(_msgkey);
 				setsid(); // become session leader
-				if (chdir("/"))
-				{
+				if (chdir("/")) {
 					msg.snd("chdir failed\n");
 					msg.snd("finished");
 					return 2;
@@ -304,8 +292,7 @@ namespace ec
 				_flck.Lock();//relock
 
 				_CLS* pcls = new _CLS();
-				if (!pcls)
-				{
+				if (!pcls) {
 					msg.snd("Start failed! no enough memery!\n");
 					msg.snd("finished");
 					_flck.Close();
@@ -314,8 +301,7 @@ namespace ec
 
 				if (msg.snd("\nstart...\r") < 0)
 					printf("send message failed\n");
-				if (!pcls->start())
-				{
+				if (!pcls->start()) {
 					msg.snd("Start failed!\n");
 					msg.snd("finished");
 					_flck.Close();
@@ -326,13 +312,11 @@ namespace ec
 				_pcls = pcls;
 				msg.snd("Start success!\n\n");
 				msg.snd("finished");
-				
+				signal(SIGINT, exithandler);
 				signal(SIGTERM, exithandler);
-				while (!_bstop) {
+				while (1) {
 					pcls->runtime();
 				}
-				_brun = false;
-				_bstop = false;	
 			}
 			return 0;
 		}
@@ -387,9 +371,15 @@ namespace ec
 			printf("usage:%s [-start] | [-stop] | [-status] | [-ver]\n", _sDaemon);
 			printf("demo:\n");
 			printf("%s -start\n", _sDaemon);
+			printf("    Start the service or run in background\n");
 			printf("%s -stop\n", _sDaemon);
+			printf("    Stop %s\n", _sDaemon);
 			printf("%s -status\n", _sDaemon);
+			printf("    Check if %s is running\n", _sDaemon);
 			printf("%s -ver\n", _sDaemon);
+			printf("    view the version of %s\n", _sDaemon);
+			printf("%s -run\n", _sDaemon);
+			printf("    Run in console\n");
 			printf("\n");
 			printf("%s %s\n", _sDaemon, _sVer);
 			printf("\n");
@@ -401,6 +391,36 @@ namespace ec
 			if (pcls){
 				pcls->docmd(argc, argv);
 				delete pcls;
+			}
+		}
+		void run()
+		{
+			_flck.Init(_spidfile);
+			int nlock = _flck.CheckLock();
+			if (nlock == -1) {
+				printf("Access Error! Please use root account!\n");
+				return;
+			}
+			else if (nlock) {
+				printf("%s alreay runging! pid = %d\n", _sDaemon, nlock);
+				return;
+			}
+			_flck.Lock();//relock
+			_CLS* pcls = new _CLS();
+			if (!pcls){
+				printf("Start failed! no enough memery!\n");
+				return;
+			}
+			if (!pcls->start())	{
+				printf("Start failed!\n");
+				return;
+			}
+			_pcls = pcls;
+			printf("Start success!\n\n");
+			signal(SIGINT, exithandler);
+			signal(SIGTERM, exithandler);
+			while (1) {
+				pcls->runtime();
 			}
 		}
 	};

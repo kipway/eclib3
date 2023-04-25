@@ -2,11 +2,15 @@
 \file ec_netio.h
 \author	jiangyong
 \email  kipway@outlook.com
-update 2022.8.25
-
+update:
+2023.2.10 update net::url support none protocol
+2023.2.3  update net::url
+2023.2.3  add socketaddr for ipv4 and ipv6
+2023.1.30 add tcpconnectasyn support ipv6
+2023.1.28 add get_ips_by_domain, update ec::net::url support ipv6
 functions for NET IO
 
-eclib 3.0 Copyright (c) 2017-2022, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway/eclib
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,6 +25,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #   include <ws2tcpip.h>
 #else
 #	include <unistd.h>
+#	include <fcntl.h>
 #	include <sys/time.h>
 #	include <sys/types.h>
 #	include <sys/socket.h>
@@ -67,6 +72,183 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 namespace ec
 {
 	namespace net {
+		class socketaddr
+		{
+		private:
+			struct sockaddr_in6 _addr;
+			char _cres[4];
+			char _viewip[48];
+			socklen_t _addrlen;
+		public:
+			socketaddr() :_addrlen(0) {
+				memset(&_addr, 0, sizeof(_addr));
+				memset(_viewip, 0, sizeof(_viewip));
+			}
+			struct sockaddr* getsockaddr(int* plen = nullptr)
+			{
+				if (!_addrlen)
+					return nullptr;
+				if (plen)
+					*plen = _addrlen;
+				return (struct sockaddr*)&_addr;
+			}
+			inline socklen_t getaddrlen() const
+			{
+				return _addrlen;
+			}
+			
+			inline const struct sockaddr* addr() const
+			{
+				return (const struct sockaddr*)&_addr;
+			}
+
+			inline socklen_t addrlen() const
+			{
+				return _addrlen;
+			}
+
+			struct sockaddr* getbuffer(socklen_t** paddrlen)
+			{
+				_addrlen = (int)sizeof(_addr);
+				*paddrlen = &_addrlen;
+				return (struct sockaddr*)&_addr;
+			}
+			uint16_t sa_family()
+			{
+				if (!_addrlen)
+					return 0;
+				return ((struct sockaddr*)&_addr)->sa_family;
+			}
+			/**
+			 * @brief set ipv4 or ipv6
+			 * @param sip
+			 * @return 0:success; -1:error
+			*/
+			int set(uint16_t usport, const char* sip = nullptr)
+			{
+				if (!usport)
+					return -1;
+				struct sockaddr_in* paddr = (struct sockaddr_in*)&_addr;
+				struct sockaddr_in6* paddr6 = (struct sockaddr_in6*)&_addr;
+				if (sip && *sip) {
+					if (strchr(sip, ':')) {
+						if (!inet_pton(AF_INET6, sip, &paddr6->sin6_addr))
+							return -1;
+						paddr6->sin6_family = AF_INET6;
+						paddr6->sin6_port = htons(usport);
+						_addrlen = (int)sizeof(struct sockaddr_in6);
+					}
+					else {
+						if (!inet_pton(AF_INET, sip, &paddr->sin_addr))
+							return -1;
+						paddr->sin_family = AF_INET;
+						paddr->sin_port = htons(usport);
+						_addrlen = (int)sizeof(struct sockaddr_in);
+					}
+				}
+				else {
+					paddr->sin_family = AF_INET;
+					paddr->sin_addr.s_addr = htonl(INADDR_ANY);
+					paddr->sin_port = htons(usport);
+					_addrlen = (int)sizeof(struct sockaddr_in);
+				}
+				return 0;
+			}
+
+			/**
+			 * @brief set  sockaddr
+			 * @param paddr
+			 * @param addlen
+			 * @return 0:OK; -1:error
+			*/
+			int set(const struct sockaddr* paddr, size_t len)
+			{
+				_addrlen = 0;
+				memset(&_addr, 0, sizeof(_addr));
+				if (len > sizeof(_addr))
+					return -1;
+				_addrlen = (int)len;
+				memcpy(&_addr, paddr, len);
+				return 0;
+			}
+
+			/**
+			 * @brief get ip and port
+			 * @param sip for out buffer
+			 * @param len sip size
+			 * @param port
+			 * @return 0:OK; -1:error
+			*/
+			int get(uint16_t& port, char* sipout, size_t ipoutlen)
+			{
+				if (!_addrlen)
+					return -1;
+				struct sockaddr* paddr = (struct sockaddr*)&_addr;
+				if (AF_INET == paddr->sa_family) {
+					struct sockaddr_in* pin = (struct sockaddr_in*)&_addr;
+					port = ntohs(pin->sin_port);
+					if (!inet_ntop(AF_INET, &(pin->sin_addr), sipout, ipoutlen))
+						return -1;
+				}
+				else if (AF_INET6 == paddr->sa_family) {
+					struct sockaddr_in6* pin6 = (struct sockaddr_in6*)&_addr;
+					port = ntohs(pin6->sin6_port);
+					if (!inet_ntop(AF_INET6, &(pin6->sin6_addr), sipout, ipoutlen))
+						return -1;
+				}
+				else
+					return -1;
+				return 0;
+			}
+
+			SOCKET accept(SOCKET s)
+			{
+				_addrlen = (int)sizeof(_addr);
+				return ::accept(s, (struct sockaddr*)&_addr, &_addrlen);
+			}
+
+			const char* viewip()
+			{
+				_viewip[0] = 0;
+				if (!_addrlen)
+					return _viewip;
+				struct sockaddr* paddr = (struct sockaddr*)&_addr;
+				if (AF_INET == paddr->sa_family) {
+					struct sockaddr_in* pin = (struct sockaddr_in*)&_addr;
+					if (!inet_ntop(AF_INET, &(pin->sin_addr), _viewip, sizeof(_viewip))) {
+						_viewip[0] = 0;
+						return _viewip;
+					}
+				}
+				else if (AF_INET6 == paddr->sa_family) {
+					struct sockaddr_in6* pin6 = (struct sockaddr_in6*)&_addr;
+					_viewip[0] = '[';
+					if (!inet_ntop(AF_INET6, &(pin6->sin6_addr), &_viewip[1], sizeof(_viewip) - 3)) {
+						_viewip[0] = 0;
+						return _viewip;
+					}
+					strcat(_viewip, "]");
+				}
+				return _viewip;
+			}
+			uint16_t port()
+			{
+				uint16_t port = 0;
+				if (!_addrlen)
+					return 0;
+				struct sockaddr* paddr = (struct sockaddr*)&_addr;
+				if (AF_INET == paddr->sa_family) {
+					struct sockaddr_in* pin = (struct sockaddr_in*)&_addr;
+					port = ntohs(pin->sin_port);
+				}
+				else if (AF_INET6 == paddr->sa_family) {
+					struct sockaddr_in6* pin6 = (struct sockaddr_in6*)&_addr;
+					port = ntohs(pin6->sin6_port);
+				}
+				return port;
+			}
+		};
+
 		template<typename SCK
 			, class = typename std::enable_if<std::is_same<SCK, SOCKET>::value>::type>
 			int io_wait(SCK s, int evt, int millisecond) // return NETIO_EVT_XXX
@@ -216,15 +398,17 @@ namespace ec
 			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
 			SOCKET tcpconnect(const charT* sip, unsigned short suport, int seconds, bool bFIONBIO = false)
 		{
-			if (!sip || !*sip || !inet_addr(sip) || !suport)
+			if (!sip || !*sip || !suport)
 				return INVALID_SOCKET;
-
-			struct sockaddr_in ServerHostAddr = { 0 };
-			ServerHostAddr.sin_family = AF_INET;
-			ServerHostAddr.sin_port = htons(suport);
-			ServerHostAddr.sin_addr.s_addr = inet_addr(sip);
-			SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
+			socketaddr srvaddr;
+			if (srvaddr.set(suport, sip) < 0)
+				return INVALID_SOCKET;
+			int addrlen = 0;
+			struct sockaddr* paddr = nullptr;
+			paddr = srvaddr.getsockaddr(&addrlen);
+			if (!paddr)
+				return INVALID_SOCKET;
+			SOCKET s = socket(srvaddr.sa_family(), SOCK_STREAM, IPPROTO_TCP);
 			if (s == INVALID_SOCKET)
 				return INVALID_SOCKET;
 
@@ -240,7 +424,7 @@ namespace ec
 				return INVALID_SOCKET;
 			}
 #endif
-			int nerr = connect(s, (sockaddr *)(&ServerHostAddr), sizeof(ServerHostAddr));
+			int nerr = connect(s, paddr, addrlen);
 			if (nerr == -1) {
 #ifdef _WIN32
 				int errcode = WSAGetLastError();
@@ -454,18 +638,19 @@ namespace ec
 
 		template<typename charT
 			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			SOCKET tcpconnectasyn(const charT* sip, unsigned short suport, int &status) //异步连接
+		SOCKET tcpconnectasyn(const charT* sip, unsigned short suport, int& status) //异步连接
 		{
 			if (!sip || !*sip || !suport)
 				return INVALID_SOCKET;
-
-			struct sockaddr_in ServerHostAddr = { 0 };
-			ServerHostAddr.sin_family = AF_INET;
-			ServerHostAddr.sin_port = htons(suport);
-			ServerHostAddr.sin_addr.s_addr = inet_addr(sip);
-			if (INADDR_NONE == ServerHostAddr.sin_addr.s_addr)
+			socketaddr srvaddr;
+			if(srvaddr.set(suport, sip) < 0)
 				return INVALID_SOCKET;
-			SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+			int addrlen = 0;
+			struct sockaddr* paddr = nullptr;
+			paddr = srvaddr.getsockaddr(&addrlen);
+			if (!paddr)
+				return INVALID_SOCKET;
+			SOCKET s = socket(srvaddr.sa_family(), SOCK_STREAM, IPPROTO_TCP);
 			if (s == INVALID_SOCKET)
 				return INVALID_SOCKET;
 			long ul = 1;
@@ -480,7 +665,7 @@ namespace ec
 				return INVALID_SOCKET;
 			}
 #endif
-			status = connect(s, (sockaddr *)(&ServerHostAddr), sizeof(ServerHostAddr));
+			status = connect(s, paddr, addrlen);
 			return s;
 		}
 #ifdef _WIN32
@@ -540,10 +725,56 @@ namespace ec
 			}
 			return -1;
 		}
+
+		template<class _Str>
+		int get_ips_by_domain(const char* domain, _Str& ipv4, _Str& ipv6)
+		{
+			int n = 0;
+			struct addrinfo* result = nullptr;
+			struct addrinfo* ptr = nullptr;
+			struct addrinfo hints;
+			char sip[40] = { 0 };
+			memset(&hints, 0, sizeof(hints));
+			hints.ai_family = AF_UNSPEC;
+			if (getaddrinfo(domain, nullptr, &hints, &result))
+				return -1;
+
+			for (ptr = result; ptr != nullptr; ptr = ptr->ai_next) {
+				switch (ptr->ai_family) {
+				case AF_INET:
+					if (ipv4.empty()) {
+						struct sockaddr_in* sockaddr_ipv4 = (struct sockaddr_in*)ptr->ai_addr;
+						if (inet_ntop(AF_INET, &sockaddr_ipv4->sin_addr, sip, sizeof(sip))) {
+							ipv4 = sip;
+							n++;
+						}
+					}
+					break;
+				case AF_INET6:
+					if (ipv6.empty()) {
+						struct sockaddr_in6* sockaddr_ipv6 = (struct sockaddr_in6*)ptr->ai_addr;
+						if (inet_ntop(AF_INET6, &sockaddr_ipv6->sin6_addr, sip, sizeof(sip))) {
+							ipv6 = sip;
+							n++;
+						}
+					}
+					break;
+				}
+			}
+			return n > 0 ? 0 : -1;
+		}
+
 		/*!
-		parse url
+		parse url support ipv4, hostname, ipv6
 		demo:
-		udp://0.0.0.0:999/path?level=dbg
+			udp://0.0.0.0:999/path?level=dbg
+			udp://[::1]:999/path?level=dbg
+			udp://kipway.net:999/path?level=dbg
+			udp://kipway.net/path?level=dbg
+			kipway.net:999
+			kipway.net
+			kipway.net/path
+			kipway.net/path?level=dbg
 		*/
 		class url
 		{
@@ -552,48 +783,89 @@ namespace ec
 			}
 			bool parse(const char* surl, size_t urlsize)
 			{
-				ec::strargs ss;
-				ec::strsplit(":/", surl, urlsize, ss, 4);
-				if (ss.size() < 2)
-					return false;
+				clear();
+				size_t i = 0;
+				std::string str;
+				_tochar(i, ':', surl, urlsize, _protocol);
+				if (_protocol.empty() || (i + 2 >= urlsize || surl[i] != '/' || surl[i + 1] != '/')) {
+					i = 0;
+					_protocol.clear();
+				}
+				else
+					i += 2;
+				if (surl[i] == '[') { //ipv6
+					_tochar(i, '[', surl, urlsize, str);
+					str.clear();
+					_tochar(i, ']', surl, urlsize, str);
+					if (str.empty() || ec::net::get_ips_by_domain(str.c_str(), _ip, _ipv6) < 0)
+						return false;
+					if (i < urlsize) {
+						if (surl[i] == ':') { //port
+							++i;
+							str.clear();
+							_tochar(i, '/', surl, urlsize, str);
+							if (!str.empty())
+								_port = atoi(str.c_str());
+						}
+						else if (surl[i] == '/') // path
+							++i;
+					}
+				}
+				else { // ipv4 or hostname
+					_tochar(i, ':', surl, urlsize, str);
+					if (str.empty() || ec::net::get_ips_by_domain(str.c_str(), _ip, _ipv6) < 0)
+						return false;
+					if (surl[i - 1] == ':') { //port
+						str.clear();
+						_tochar(i, '/', surl, urlsize, str);
+						if (!str.empty())
+							_port = atoi(str.c_str());
+					}
+				}
+				_tochar(i, '?', surl, urlsize, _path);
+				_tochar(i, '\n', surl, urlsize, _args);
+				return true;
+			}
+			void clear()
+			{
+				_port = 0;
 				_protocol.clear();
 				_ip.clear();
+				_ipv6.clear();
 				_path.clear();
 				_args.clear();
-
-				_protocol.append(ss[0]._str, ss[0]._size);
-
-				_ip.append(ss[1]._str, ss[1]._size);
-				if (INADDR_NONE == inet_addr(_ip.c_str())) {
-					std::string t = _ip;
-					if (ec::net::get_ip_by_domain(t.c_str(), _ip) < 0)
-						return false;
+			}
+			void _tochar(size_t& pos, char c, const char* surl, size_t urlsize, std::string& so)
+			{ // 从当前读取字符到so，直到遇到c(不包含), pos跳过c位置。
+				while (pos < urlsize) {
+					if (surl[pos] == c) {
+						++pos;
+						break;
+					}
+					so.push_back(surl[pos]);
+					++pos;
 				}
-
-				if ((ss.size() > 2) && (*(ss[2]._str - 1) == ':')) {
-					_port = ss[2].stoi();
-					if(ss.size() > 3)
-						_path.append(ss[3]._str, urlsize - (ss[3]._str - surl));
-					if (!_port)
-						return false;
-				}
-				else {
-					_port = 0;
-					_path.append(ss[2]._str, urlsize - (ss[2]._str - surl));
-				}
-				size_t apos = _path.find_first_of('?');
-				if (std::string::npos != apos) {
-					_args.append(_path.c_str() + apos + 1);
-					_path.resize(apos);
-				}
-				return true;
+			}
+			const char* ipstr()
+			{
+				return _ip.empty() ? _ipv6.c_str() : _ip.c_str();
 			}
 		public:
 			uint16_t _port;
 			std::string _protocol;
 			std::string _ip;
+			std::string _ipv6;
 			std::string _path;
 			std::string _args;
 		};
+
+		inline void setfd_cloexec(SOCKET fd)
+		{
+#ifndef _WIN32
+			int flags = fcntl(fd, F_GETFD);
+			flags |= FD_CLOEXEC;
+			fcntl(fd, F_SETFD, flags);
+#endif
+		}
 	}//net
 }// ec

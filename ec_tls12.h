@@ -2,7 +2,8 @@
 \file ec_tls12.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.10.1
+\update:
+2023.2.6   add srvca::isok()
 
 TLS1.2(rfc5246)  session class
 
@@ -1490,6 +1491,9 @@ namespace ec
 					RSA_free(_pRsaPub);
 				_pRsaPub = nullptr;
 				_pRsaPrivate = nullptr;
+			}
+			inline bool isok() {
+				return _pRsaPub && _pRsaPrivate;
 			}
 			~srvca()
 			{

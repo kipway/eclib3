@@ -2,12 +2,13 @@
 \file ec_jsonx.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.10.9
+\update
+  2023.2.19 update get_jtime
 
 json
 	a fast json parse class
 
-eclib 3.0 Copyright (c) 2017-2022, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,13 +17,20 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #pragma once
 #include <string.h>
 #include <string>
+#include <math.h>
+#include <float.h>
 #include "ec_vector.h"
+#include "ec_string.h"
+
 #ifndef MAXSIZE_JSONX_KEY
 #	define MAXSIZE_JSONX_KEY 63
 #endif
 #include "ec_text.h"
 #include "ec_time.h"
 #include "ec_base64.h"
+#include "dtoa_milo.h"
+
+uint32_t inet_network(const char* cp);
 namespace ec
 {
 	class json // parse json object, fast no copy
@@ -78,7 +86,7 @@ namespace ec
 		json& operator = (const json&) = delete;
 		json()
 		{
-			_kvs.reserve(128);
+			_kvs.reserve(256);
 		}
 		~json()
 		{
@@ -94,6 +102,15 @@ namespace ec
 				return &_kvs[i];
 			return nullptr;
 		}
+		const t_kv* getkv(const char* key)
+		{
+			for (const auto& i : _kvs) {
+				if (i._k.ieq(key))
+					return &i;
+			}
+			return nullptr;
+		}
+
 		const t_kv* getkv(const txt& key)
 		{
 			for (const auto& i : _kvs) {
@@ -106,6 +123,15 @@ namespace ec
 		const t_kv& operator [](size_t pos)
 		{
 			return _kvs[pos];
+		}
+
+		const txt* getval(const char* key)
+		{
+			for (const auto& i : _kvs) {
+				if (i._k.ieq(key))
+					return &i._v;
+			}
+			return nullptr;
 		}
 
 		const txt* getval(const txt& key)
@@ -132,33 +158,22 @@ namespace ec
 		template<class _Str>
 		bool getstr(const txt& key, _Str& sout)
 		{
-			const txt* pv = getval(key);
-			if (!pv || pv->empty()) {
-				sout.clear();
-				return false;
-			}
-			try {
-				sout.assign(pv->_str, pv->_size);
-			}
-			catch (...) {
-				return false;
-			}
-			return true;
+			return get_jstring(key, sout);
 		}
 
 		bool getstr(const txt& key, char* sout, size_t outsize)
 		{
-			const txt* pv = getval(key);
-			if (!pv || pv->empty() || pv->_size >= outsize) {
-				*sout = '\0';
-				return false;
+			std::mstring stmp;
+			*sout = 0;
+			if (get_jstring(key, stmp) && stmp.size() < outsize && !stmp.empty()) {
+				memcpy(sout, stmp.c_str(), stmp.size());
+				sout[stmp.size()] = 0;
+				return true;
 			}
-			memcpy(sout, pv->_str, pv->_size);
-			sout[pv->_size] = 0;
-			return true;
+			return false;
 		}
 
-		bool from_str(txt& s)
+		bool from_str(txt& s, const char* keyend = nullptr)
 		{
 			_kvs.clear();
 			if (s.empty())
@@ -168,14 +183,14 @@ namespace ec
 			if (*s._str == '[')
 				return from_array(s);
 			else if (*s._str == '{')
-				return from_obj(s);
+				return from_obj(s, keyend);
 			return false;
 		}
 
-		inline bool from_str(const char* s, size_t size)
+		inline bool from_str(const char* s, size_t size, const char* keyend = nullptr)
 		{
 			txt t(s, size);
-			return from_str(t);
+			return from_str(t, keyend);
 		}
 
 		static bool load_file(const char* sfile, std::string& sout)
@@ -255,8 +270,11 @@ namespace ec
 			val = 0;
 			if (!pkv || pkv->_v.empty())
 				return false;
-			if (std::is_integral<_VAL>::value)
+			if (std::is_integral<_VAL>::value) {
 				val = (_VAL)pkv->_v.stoll();
+				if (!val && (pkv->_v.ieq("true") || pkv->_v.ieq("yes")))
+					val = 1;
+			}
 			else if (std::is_floating_point<_VAL>::value)
 				val = (_VAL)pkv->_v.stof();
 			return true;
@@ -264,6 +282,18 @@ namespace ec
 
 		template<typename _STR>
 		bool get_jstring(const char* key, _STR& val)
+		{
+			const ec::json::t_kv* pkv;
+			pkv = getkv(key);
+			val.clear();
+			if (!pkv)
+				return false;
+			fromjstr(pkv->_v._str, pkv->_v._size, val);
+			return true;
+		}
+
+		template<typename _STR>
+		bool get_jstring(const txt& key, _STR& val)
 		{
 			const ec::json::t_kv* pkv;
 			pkv = getkv(key);
@@ -385,10 +415,11 @@ namespace ec
 		{
 			char sip[40] = { 0 };
 			hostv = 0;
-			if (!getstr(key, sip, sizeof(sip)))
+			const txt* pv = getval(key);
+			if (!pv || pv->empty() || pv->_size >= sizeof(sip))
 				return;
-			if (!sip[0])
-				return;
+			memcpy(sip, pv->_str, pv->_size);
+			sip[pv->_size] = 0;
 #ifdef _WIN32
 			hostv = (_VAL)ntohl(inet_addr(sip));
 #else
@@ -396,18 +427,29 @@ namespace ec
 #endif
 		}
 
-		template<typename _VAL>
-		void get_jtime(const char* key, _VAL& val)
+		template<typename _VAL = int64_t>
+		bool get_jtime(const char* key, _VAL& val)
 		{
 			const ec::json::t_kv* pkv;
 			pkv = getkv(key);
-			val = 0;
 			if (!pkv || pkv->_v.empty())
-				return;
-			val = (_VAL)ec::string2jstime(pkv->_v._str, pkv->_v._size);
+				return false;
+			int64_t ltime = -1;
+			if (ec::json::jnumber == pkv->_type) {
+				ltime = (int64_t)pkv->_v.stoll();
+			}
+			else if (ec::json::jstring == pkv->_type) {
+				ltime = ec::string2jstime(pkv->_v._str, pkv->_v._size);
+			}
+			if (ltime < 0) {
+				return false;
+			}
+			val = (_VAL)ltime;
+			return true;
 		}
+
 	private:
-		bool from_obj(txt& s)
+		bool from_obj(txt& s, const char* keyend = nullptr)
 		{
 			t_kv  it;
 			if (*s._str != '{')
@@ -466,11 +508,13 @@ namespace ec
 				else { //number
 					it._v = s;
 					it._type = jnumber;
-					if (!s.json_tochar(",}"))
+					if (!s.json_tochar(",}\n\x20\t"))
 						return false;
 					it._v._size = s._str - it._v._str;
 				}
 				_kvs.push_back(it);
+				if (keyend && it._k.ieq(keyend))
+					return true;
 			}
 			return false;
 		}
@@ -655,6 +699,107 @@ namespace ec
 			sout.push_back('"');
 		}
 
+		template<typename _Tp, class _STR, class = typename std::enable_if<std::is_integral<_Tp>::value&& std::is_signed<_Tp>::value>>
+		void number_outstring(_Tp v, _STR& sout) // 4x speed vs sprintf @linux-g++ 4.8.5;  6x speed vs sprintf @win-vc2017; 
+		{
+			using utype = typename std::conditional < sizeof(_Tp) < 8u, uint32_t, uint64_t > ::type;
+			utype uv = v < 0 ? -v : v;
+			char buff[32];
+			char* ptr;
+			ptr = &buff[sizeof(buff) - 1];
+			*ptr = '\0';
+			do {
+				*--ptr = '0' + (uv % 10);
+				uv /= 10;
+			} while (uv);
+			if (v < 0)
+				*--ptr = '-';
+			sout.append(ptr, sizeof(buff) - (ptr - &buff[0]) - 1);
+		}
+
+		template<class _STR>
+		void number_outstring(uint32_t v, _STR& sout) // 4x speed vs sprintf @linux-g++ 4.8.5;  6x speed vs sprintf @win-vc2017; 
+		{
+			uint32_t uv = v;
+			char buff[32];
+			char* ptr;
+			ptr = &buff[sizeof(buff) - 1];
+			*ptr = '\0';
+			do {
+				*--ptr = '0' + (uv % 10);
+				uv /= 10;
+			} while (uv);
+			sout.append(ptr, sizeof(buff) - (ptr - &buff[0]) - 1);
+		}
+
+		template<class _STR>
+		void number_outstring(uint64_t v, _STR& sout) // 4x speed vs sprintf @linux-g++ 4.8.5;  6x speed vs sprintf @win-vc2017; 
+		{
+			uint64_t uv = v;
+			char buff[32];
+			char* ptr;
+			ptr = &buff[sizeof(buff) - 1];
+			*ptr = '\0';
+			do {
+				*--ptr = '0' + (uv % 10);
+				uv /= 10;
+			} while (uv);
+			sout.append(ptr, sizeof(buff) - (ptr - &buff[0]) - 1);
+		}
+
+		template<class _STR>
+		void number_outstring(double v, _STR& sout) // 3.5x - 7.5x speed vs sprintf @linux-g++ 4.8.5 and @win-vc2017; 
+		{
+			double vf = v < 0.0 ? -v : v;
+			if (vf > 0.000001 && vf < 9223372036854775807.0) { // 7.5X
+				double vi = 0;
+				vf = modf(vf, &vi);
+				int64_t fpart = (int64_t)(vf * 10000000);
+				if (v < 0.0)
+					sout.push_back('-');
+				if (!fpart) {
+					number_outstring((int64_t)(vi), sout);
+					sout.append(".0", 2);
+					return;
+				}
+				if (fpart % 10 >= 5) {
+					fpart += (10 - fpart % 10);
+					if (10000000 == fpart) {
+						fpart = 0;
+						vi = v < 0 ? vi - 1 : vi + 1;
+					}
+				}
+				else if (fpart % 10)
+					fpart -= fpart % 10;
+				number_outstring((int64_t)(vi), sout);
+				sout.push_back('.');
+				char buff[8] = { '0','0','0','0','0','0','0','\0' };
+				char* ptr;
+				ptr = &buff[sizeof(buff) - 1];
+				do {
+					*--ptr = '0' + (fpart % 10);
+					fpart /= 10;
+				} while (fpart && ptr > &buff[0]);
+				ptr = &buff[6];
+				while (*ptr == '0' && ptr > &buff[0]) {
+					*ptr = 0;
+					--ptr;
+				}
+				sout.append(buff);
+			}
+			else { // 3.5x
+				char s[64];
+				dtoa_milo(v, s);
+				sout.append(s);
+			}
+		}
+
+		template<class _STR>
+		void number_outstring(float v, _STR& sout)
+		{
+			number_outstring((double)v, sout);
+		}
+
 		template<typename _VAL, typename _STROUT>
 		void out_jnumber(int& nf, const char* key, _VAL val, _STROUT& sout, bool force = false)
 		{
@@ -665,7 +810,7 @@ namespace ec
 			++nf;
 			sout.push_back('"');
 			sout.append(key).append("\":");
-			sout.append(std::to_string(val).c_str());
+			number_outstring(val, sout);
 		}
 
 		template<typename _CLS, typename _STROUT>
@@ -732,23 +877,40 @@ namespace ec
 			for (auto& v : vals) {
 				if (n)
 					sout.push_back(',');
-				sout.append(std::to_string(v));
+				number_outstring(v, sout);
 				++n;
 			}
 			sout.push_back(']');
 		}
+
 		template<typename _STROUT>
-		void out_jtime(int& nf, const char* key, int64_t val, _STROUT& sout)
+		void out_jtime(int& nf, const char* key, int64_t val, _STROUT& sout, int timefmt = ECTIME_ISOSTR)
 		{
-			if (!val)
+			if (val <= 0)
 				return;
 			if (nf)
 				sout.push_back(',');
 			++nf;
 			sout.push_back('"');
-			sout.append(key).append("\":\"");
-			jstime2localstring(val, sout);
-			sout.push_back('"');
+			sout.append(key).append("\":");
+			if (ECTIME_ISOSTR == timefmt) {
+				sout.push_back('"');
+				jstime2localstring(val, sout);
+				sout.push_back('"');
+			}
+			else if (ECTIME_STAMP == timefmt) {
+				number_outstring(val, sout);
+			}
+			else {
+				sout.push_back('"');
+				ec::cTime t((time_t)(val / 1000));
+				char s[64];
+				size_t zn = snprintf(s, sizeof(s), "%4d/%02d/%02d %02d:%02d:%02d.%03d", t._year, t._mon, t._day,
+					t._hour, t._min, t._sec, (int)(val % 1000));
+				if (zn < sizeof(s))
+					sout.append(s, zn);
+				sout.push_back('"');
+			}
 		}
 
 		template<typename _STROUT>
@@ -762,9 +924,10 @@ namespace ec
 			sout.push_back('"');
 			sout.append(key).append("\":\"");
 			char sip[80];
-			snprintf(sip, sizeof(sip), "%u.%u.%u.%u", hostv >> 24, (hostv >> 16) & 0xFF,
+			size_t zn = snprintf(sip, sizeof(sip), "%u.%u.%u.%u", hostv >> 24, (hostv >> 16) & 0xFF,
 				(hostv >> 8) & 0xFF, hostv & 0xFF);
-			sout.append(sip);
+			if(zn < sizeof(sip))
+				sout.append(sip);
 			sout.push_back('"');
 		}
 

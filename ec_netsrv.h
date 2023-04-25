@@ -2,12 +2,15 @@
 \file ec_netsrv.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.10.1
+\update 2023.2.3
+
+2023.2.3 optimize ipv6
+2023.1.27 add ipv6 tcp server
 
 net::server
 	a class for TCP/UDP, HTTP/HTTPS, WS/WSS
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -53,10 +56,13 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #define EC_NET_SRV_IPC  1 // IPC server
 #define EC_NET_SRV_UDP  2 // UDP server
 #define EC_NET_SRV_UNIX 3 // AF_UNIX server
+#define EC_NET_SRV_TCPIPV6  10 // ipv6 TCP server
+#define EC_NET_SRV_UDPIPV6  12 // ipv6 UDP server
 
 #include "ec_vector.h"
 #include "ec_netio.h"
 #include "ec_string.h"
+#include "ec_netio.h"
 
 #ifndef _WIN32
 #include <sys/resource.h>
@@ -178,8 +184,8 @@ namespace ec
 							if (_plog)
 								_plog->add(CLOG_DEFAULT_MSG, "%s create success, ucid start %u", _sucidfile, _unextid);
 							char sid[40] = { 0 };
-							if (snprintf(sid, sizeof(sid), "%u", _unextid) > 0)
-								fwrite(sid, 1, strlen(sid), pf);
+							size_t zn = snprintf(sid, sizeof(sid), "%u", _unextid);
+							fwrite(sid, 1, zn, pf);
 							fclose(pf);
 						}
 						else {
@@ -222,15 +228,16 @@ namespace ec
 			\brief add tcp server
 			\param listenid = (EC_NET_LISTENID , EC_NET_CONOUTID)
 			*/
-			uint32_t add_tcpsrv(uint32_t listenid, uint16_t port, const char* sip = nullptr)
+			uint32_t add_tcpsrv(uint32_t listenid, uint16_t port, const char* sip = nullptr, int ip6only = 0)
 			{
-				if (!port || exist_srv(port, EC_NET_SRV_TCP))
+				int srvtype = (sip && *sip && strchr(sip, ':')) ? EC_NET_SRV_TCPIPV6 : EC_NET_SRV_TCP;
+				if (!port || exist_srv(port, srvtype))
 					return 0;
 
 				t_listen ni;
 				ni._wport = port;
-				ni._fd = listen_tcp(port, sip);
-				ni._srvtype = EC_NET_SRV_TCP;
+				ni._fd = listen_tcp(port, sip, ip6only);
+				ni._srvtype = srvtype;
 				if (INVALID_SOCKET == ni._fd)
 					return 0;
 				if (!listenid)
@@ -242,6 +249,10 @@ namespace ec
 					::closesocket(ni._fd);
 					return 0;
 				}
+				if (sip && *sip)
+					ec::strlcpy(p->_ip, sip, sizeof(p->_ip));
+				else
+					ec::strlcpy(p->_ip, "0.0.0.0", sizeof(p->_ip));
 				_maplisten.set(ni.key, ni);
 				_map.set(ni.key, (PNETSS)p);
 				_bmodify_pool = true;
@@ -304,38 +315,48 @@ namespace ec
 				return ni.key;
 			}
 #endif
-			uint32_t add_udpsrv(uint32_t ucid, uint16_t port, const char* sip = nullptr)
+			//return server ID or 0 failed; 
+			uint32_t add_udpsrv(uint32_t ucid, uint16_t port, const char* sip = nullptr, int ip6only = 0)
 			{
-				if (!port || exist_srv(port, EC_NET_SRV_UDP))
+				int srvtype = (sip && *sip && strchr(sip, ':')) ? EC_NET_SRV_UDPIPV6 : EC_NET_SRV_UDP;
+				if (!port || exist_srv(port, srvtype))
 					return 0;
 
-				SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+				socketaddr netaddr;
+				if (netaddr.set(port, sip) < 0)
+					return 0;
+
+				SOCKET s = socket(netaddr.sa_family(), SOCK_DGRAM, IPPROTO_UDP);
 				if (s == INVALID_SOCKET)
 					return 0;
+				SetNoBlock(s);
+				int opt = 1;
+				if (ip6only && AF_INET6 == netaddr.sa_family() &&
+					SOCKET_ERROR == setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&opt, sizeof(opt))) {
+					::closesocket(s);
+					if (_plog)
+						_plog->add(CLOG_DEFAULT_ERR, "ipv6 UDP port [%d] setsockopt IPV6_V6ONLY failed", port);
+					return 0;
+				}
 
-				struct sockaddr_in sin;
-				memset(&sin, 0, sizeof(sin));
-				sin.sin_family = AF_INET;
-				if (!sip || !*sip)
-					sin.sin_addr.s_addr = htonl(INADDR_ANY);
-				else
-					sin.sin_addr.s_addr = inet_addr(sip);
-				sin.sin_port = htons(port);
-				if (SOCKET_ERROR == bind(s, (struct sockaddr *)&sin, (int)sizeof(sin))) {
+				int addrlen = 0;
+				struct sockaddr* paddr = netaddr.getsockaddr(&addrlen);
+				if (!paddr || SOCKET_ERROR == bind(s, paddr, addrlen)) {
 					::closesocket(s);
 					return 0;
 				}
 
+				setfd_cloexec(s);
 				t_listen ni;
 				if (!ucid)
 					ni.key = nextsrvid();
 				else
 					ni.key = ucid;
 				ni._wport = port;
-				ni._srvtype = EC_NET_SRV_UDP;
+				ni._srvtype = srvtype;
 				ni._fd = s;
 
-				session_udpsrv *p = new session_udpsrv(ni.key, ni._fd, _pmem, _plog, &_sndbufblks);
+				session_udpsrv* p = new session_udpsrv(ni.key, ni._fd, _pmem, _plog, &_sndbufblks);
 				if (!p) {
 					::closesocket(ni._fd);
 					return 0;
@@ -554,6 +575,7 @@ namespace ec
 				_map.erase(ucid);
 			}
 		protected:
+			//2023-2-5 for support ipv6 src_addr is sockaddr* , sa_family decision is sockaddr_in* or sockaddr_in6*
 			virtual bool onmessage(int listenid, uint32_t ucid, uint32_t protoc, bytes &pkgr, const struct sockaddr_in *src_addr) = 0; // 调度和处理消息, return false will disconnect
 
 			virtual void onconnect(int listenid, uint32_t ucid) = 0;
@@ -614,8 +636,8 @@ namespace ec
 					FILE *pf = fopen(_sucidfile, "wt");
 					if (pf) {
 						char sid[40] = { 0 };
-						if (snprintf(sid, sizeof(sid), "%u", _unextid) > 0)
-							fwrite(sid, 1, strlen(sid), pf);
+						size_t zn = snprintf(sid, sizeof(sid), "%u", _unextid);
+						fwrite(sid, 1, zn, pf);
 						fclose(pf);
 						if (_plog)
 							_plog->add(CLOG_DEFAULT_DBG, "write ucid %u to %s success", _unextid, _sucidfile);
@@ -653,18 +675,19 @@ namespace ec
 				return true;
 			}
 #endif
-#ifndef _WIN32
+#ifdef _WIN32
+			static int SetNoBlock(SOCKET s)
+			{
+				u_long iMode = 1;
+				return ioctlsocket(s, FIONBIO, &iMode);
+			}
+#else
 			static int  SetNoBlock(int sfd)
 			{
-				int flags, s;
-				flags = fcntl(sfd, F_GETFL, 0);
+				int flags = fcntl(sfd, F_GETFL, 0);
 				if (flags == -1)
 					return -1;
-				flags |= O_NONBLOCK;
-				s = fcntl(sfd, F_SETFL, flags);
-				if (s == -1)
-					return -1;
-				return 0;
+				return fcntl(sfd, F_SETFL, flags | O_NONBLOCK);
 			}
 #endif
 			int get_srvtype(uint32_t listenid)
@@ -717,7 +740,7 @@ namespace ec
 					if (ps->_protoc == EC_NET_SS_LISTEN) { //listen
 						if (p[i].revents & POLLIN) {
 							int nsrvtye = get_srvtype(puid[i]);
-							if (EC_NET_SRV_TCP == nsrvtye) {
+							if (EC_NET_SRV_TCP == nsrvtye || EC_NET_SRV_TCPIPV6 == nsrvtye) {
 								if (acp(puid[i]))
 									_bmodify_pool = true;
 							}
@@ -731,16 +754,20 @@ namespace ec
 									_bmodify_pool = true;
 							}
 #endif
-							else if (EC_NET_SRV_UDP == nsrvtye) {
-								_udpbuf.clear();
-								struct sockaddr_in addr;
-								socklen_t addrlen = (socklen_t)sizeof(addr);
-								memset(&addr, 0, sizeof(addr));
-								int nr = ::recvfrom(p[i].fd, (char*)_udpbuf.data(), (int)_udpbuf.capacity(), 0, (struct sockaddr*)&addr, &addrlen);
-								if (nr > 0) {
-									_udpbuf.resize(nr);
-									onmessage(ps->_listenid, puid[i], EC_NET_SRV_UDP, _udpbuf, &addr);
-								}
+							else if (EC_NET_SRV_UDP == nsrvtye || EC_NET_SRV_UDPIPV6 == nsrvtye) {
+								socklen_t* paddrlen = nullptr;
+								socketaddr peeraddr;
+								struct sockaddr* paddr = peeraddr.getbuffer(&paddrlen);
+								int nr, nnum = 5;
+								do{
+									--nnum;
+									_udpbuf.clear();
+									nr = ::recvfrom(p[i].fd, (char*)_udpbuf.data(), (int)_udpbuf.capacity(), 0, paddr, paddrlen);
+									if (nr > 0) {
+										_udpbuf.resize(nr);
+										onmessage(ps->_listenid, puid[i], EC_NET_SRV_UDP, _udpbuf, (const struct sockaddr_in*)paddr);
+									}
+								} while (nr > 0 && nnum > 0);
 								p[i].events = POLLIN;
 							}
 						}
@@ -749,7 +776,7 @@ namespace ec
 					}
 					if (p[i].revents & (POLLERR | POLLHUP | POLLNVAL)) { // error
 						if (closeucid(puid[i]) && _plog)
-							_plog->add(CLOG_DEFAULT_MOR, "ucid(%u) disconnect", puid[i]);
+							_plog->add(CLOG_DEFAULT_MOR, "ucid(%u) disconnect, error revents 0x%X", puid[i], p[i].revents);
 						p[i].revents = 0;
 						continue;
 					}
@@ -806,16 +833,18 @@ namespace ec
 			virtual void on_emfile()
 			{
 			}
-			SOCKET listen_tcp(unsigned short wport, const char* sip = nullptr)
+			SOCKET listen_tcp(unsigned short wport, const char* sip = nullptr, int ip6only = 0)
 			{
 				if (!wport)
 					return INVALID_SOCKET;
 				SOCKET sl = INVALID_SOCKET;
-				struct sockaddr_in	netaddr;
+				socketaddr netaddr;
+				if (netaddr.set(wport, sip) < 0)
+					return INVALID_SOCKET;
 #ifdef _WIN32
-				if ((sl = WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED)) == INVALID_SOCKET)
+				if ((sl = WSASocket(netaddr.sa_family(), SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED)) == INVALID_SOCKET)
 #else
-				if ((sl = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET)
+				if ((sl = socket(netaddr.sa_family(), SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET)
 #endif
 				{
 					if (_plog)
@@ -823,17 +852,16 @@ namespace ec
 					fprintf(stderr, "TCP port %u socket error!\n", wport);
 					return INVALID_SOCKET;
 				}
-				netaddr.sin_family = AF_INET;
-				if (!sip || !sip[0])
-					netaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-				else
-					netaddr.sin_addr.s_addr = inet_addr(sip);
-				netaddr.sin_port = htons(wport);
-
 				int opt = 1;
+				if (ip6only && AF_INET6 == netaddr.sa_family() && 
+					SOCKET_ERROR == setsockopt(sl, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&opt, sizeof(opt))) {
+					::closesocket(sl);
+					if (_plog)
+						_plog->add(CLOG_DEFAULT_ERR, "ipv6 TCP port [%d] setsockopt IPV6_V6ONLY failed", wport);
+					return INVALID_SOCKET;
+				}
 #ifdef _WIN32
 				u_long iMode = 1;
-
 				if (SOCKET_ERROR == setsockopt(sl, SOL_SOCKET, SO_REUSEADDR,
 					(const char *)&opt, sizeof(opt)) || SOCKET_ERROR == ioctlsocket(sl, FIONBIO, &iMode)) {
 					::closesocket(sl);
@@ -850,7 +878,9 @@ namespace ec
 					return INVALID_SOCKET;
 				}
 #endif
-				if (bind(sl, (const sockaddr *)&netaddr, sizeof(netaddr)) == SOCKET_ERROR) {
+				int addrlen = 0;
+				struct sockaddr* paddr = netaddr.getsockaddr(&addrlen);
+				if (!paddr || bind(sl, paddr, addrlen) == SOCKET_ERROR) {
 #ifdef _WIN32
 					int nerr = ::WSAGetLastError();
 					::closesocket(sl);
@@ -859,8 +889,8 @@ namespace ec
 					::close(sl);
 #endif
 					if (_plog)
-						_plog->add(CLOG_DEFAULT_ERR, "TCP port [%d] bind failed with error %d", wport, nerr);
-					fprintf(stderr, "ERR:TCP port [%u] bind failed with error %d\n", wport, nerr);
+						_plog->add(CLOG_DEFAULT_ERR, "TCP port [%d] bind %s failed with error %d", wport, (sip && *sip) ? sip : "0.0.0.0", nerr);
+					fprintf(stderr, "ERR:TCP port [%u] bind %s failed with error %d\n", wport, (sip && *sip) ? sip : "0.0.0.0", nerr);
 					return INVALID_SOCKET;
 				}
 				if (listen(sl, SOMAXCONN) == SOCKET_ERROR) {
@@ -873,10 +903,11 @@ namespace ec
 #endif
 
 					if (_plog)
-						_plog->add(CLOG_DEFAULT_ERR, "TCP port %d  listen failed with error %d", wport, nerr);
-					fprintf(stderr, "ERR: TCP port %u  listen failed with error %d\n", wport, nerr);
+						_plog->add(CLOG_DEFAULT_ERR, "TCP port %d  listen %s failed with error %d", wport, (sip && *sip) ? sip : "0.0.0.0", nerr);
+					fprintf(stderr, "ERR: TCP port %u  listen %s failed with error %d\n", wport, (sip && *sip) ? sip : "0.0.0.0", nerr);
 					return INVALID_SOCKET;
 				}
+				setfd_cloexec(sl);
 				return sl;
 			}
 
@@ -929,6 +960,7 @@ namespace ec
 					fprintf(stderr, "ERR: IPC port %u  listen failed with error %d\n", wport, nerr);
 					return INVALID_SOCKET;
 				}
+				setfd_cloexec(sl);
 				return sl;
 			}
 
@@ -970,6 +1002,7 @@ namespace ec
 					fprintf(stderr, "ERR: af_unix [%s]  listen failed with error %d\n", spath, nerr);
 					return INVALID_SOCKET;
 				}
+				setfd_cloexec(sl);
 				return sl;
 			}
 #endif
@@ -1006,14 +1039,13 @@ namespace ec
 			bool acp(uint32_t listenid)
 			{
 				SOCKET	sAccept;
-				struct  sockaddr_in		 addrClient;
-				int		nClientAddrLen = (int)sizeof(addrClient);
+				socketaddr clientaddr;
 				t_listen* pl = _maplisten.get(listenid);
 				if (!pl)
 					return false;
 
 #ifdef _WIN32
-				if ((sAccept = ::accept(pl->_fd, (struct sockaddr*)(&addrClient), &nClientAddrLen)) == INVALID_SOCKET) {
+				if ((sAccept = clientaddr.accept(pl->_fd)) == INVALID_SOCKET) {
 					int nerr = WSAGetLastError();
 					if (WSAEMFILE == nerr) {
 						if (!_nerr_emfile_count && _plog)
@@ -1032,7 +1064,7 @@ namespace ec
 				}
 				net::setsendbuf(sAccept, 1024 * 32);
 #else
-				if ((sAccept = ::accept(pl->_fd, (struct sockaddr*)(&addrClient), (socklen_t*)&nClientAddrLen)) == INVALID_SOCKET) {
+				if ((sAccept = clientaddr.accept(pl->_fd)) == INVALID_SOCKET) {
 					int nerr = errno;
 					if (EMFILE == nerr) {
 						if (!_nerr_emfile_count && _plog)
@@ -1060,17 +1092,17 @@ namespace ec
 					_plog->add(CLOG_DEFAULT_ERR, "TCP server port(%d) error EMFILE reserved!", pl->_wport);
 					return false;
 				}
+				setfd_cloexec(sAccept);
 				onaccept(listenid, sAccept);
 				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog, &_sndbufblks);
 				if (!pi) {
 					::closesocket(sAccept);
 					return false;
 				}
-				pi->setip(inet_ntoa(addrClient.sin_addr));
-				pi->_peerport = ntohs(addrClient.sin_port);
+				clientaddr.get(pi->_peerport, pi->_ip, sizeof(pi->_ip));
 				_map.set(pi->_ucid, pi);
 				if (_plog)
-					_plog->add(CLOG_DEFAULT_MOR, "port(%u) ucid(%u) connect from %s:%u", pl->_wport, pi->_ucid, pi->_ip, ntohs(addrClient.sin_port));
+					_plog->add(CLOG_DEFAULT_MOR, "TCP port(%u) ucid(%u) connect from %s:%u", pl->_wport, pi->_ucid, clientaddr.viewip(), pi->_peerport);
 				onconnect(listenid, pi->_ucid);
 				return true;
 			}
@@ -1135,6 +1167,7 @@ namespace ec
 					_plog->add(CLOG_DEFAULT_ERR, "IPC server port(%d) error EMFILE reserved!", pl->_wport);
 					return false;
 				}
+				setfd_cloexec(sAccept);
 				tcpnodelay(sAccept);
 				setkeepalive(sAccept);
 				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog, &_sndbufblks);
@@ -1152,14 +1185,6 @@ namespace ec
 				onconnect(listenid, pi->_ucid);
 				return true;
 			}
-#ifdef _WIN32
-			int SetNoBlock(SOCKET s)
-			{
-				u_long iMode = 1;
-				return ioctlsocket(s, FIONBIO, &iMode);
-			}
-#endif
-
 #if !defined _WIN32 || defined USE_AF_WIN
 			bool acp_afunix(uint32_t listenid)
 			{
@@ -1204,6 +1229,7 @@ namespace ec
 					_plog->add(CLOG_DEFAULT_ERR, "IPC server af_unix error EMFILE reserved!");
 					return false;
 				}
+				setfd_cloexec(sAccept);
 				tcpnodelay(sAccept);
 				setkeepalive(sAccept);
 				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog, &_sndbufblks);

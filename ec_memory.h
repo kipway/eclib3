@@ -2,6 +2,7 @@
 \file ec_memory.h
 \author	jiangyong
 \email  kipway@outlook.com
+\update 2023.3.1 update io_buffer::append
 \update 2022.10.10 update autobuf, mark mem_sets, block_allocator, cycle_fifo deprecated
 \update 2022.10.8 update parsebuffer
 \update 2022.7.24 add parsebuffer
@@ -25,7 +26,7 @@ io_buffer
 parsebuffer
 	for net io read parse buffer
 
-eclib 3.0 Copyright (c) 2017-2022, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -306,7 +307,8 @@ namespace ec {
 			if (_numblks < 4)
 				_numblks = 4;
 			_pbuf = (blk_*)::malloc(_numblks * sizeof(blk_));
-			memset(_pbuf, 0, sizeof(_numblks * sizeof(blk_)));
+			if(_pbuf)
+				memset(_pbuf, 0, sizeof(_numblks * sizeof(blk_)));
 		}
 
 		cycle_fifo(cycle_fifo &&v)  //move construct
@@ -541,8 +543,18 @@ namespace ec {
 			size_t numblk = _size * 10000;
 			return static_cast<int>(numblk / _sizemax);
 		}
-		bool append(const void* pdata, size_t len)
+
+		/**
+		 * @brief append to buffer
+		 * @param pdata  data
+		 * @param len  bytes of pdata
+		 * @param pzappendsize out append size
+		 * @return if append size equal len return true, else return false;
+		*/
+		bool append(const void* pdata, size_t len, size_t* pzappendsize = nullptr)
 		{
+			if (pzappendsize)
+				*pzappendsize = 0;
 			if (!pdata || !len)
 				return true;
 			const uint8_t* p = (uint8_t*)pdata;
@@ -567,6 +579,8 @@ namespace ec {
 				zt = blkappend(_ptail, p + zadd, len - zadd);
 				_size += zt;
 				zadd += zt;
+				if (pzappendsize)
+					*pzappendsize += zt;
 			}
 			return true;
 		}

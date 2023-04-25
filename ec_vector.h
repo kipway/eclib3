@@ -277,16 +277,11 @@ namespace ec
 			if (n <= _ubufsize)
 				return;
 
-			value_type	*pt = nullptr;
+			value_type* pt = nullptr;
 			size_t sizeout = 0;
-			pt = (value_type*)mem_malloc(n * sizeof(value_type), sizeout);
+			pt = (value_type*)mem_realloc(_pbuf, n * sizeof(value_type), sizeout);
 			if (!pt)
 				throw std::bad_alloc();
-			if (_pbuf) {
-				if (_usize)
-					memcpy(pt, _pbuf, _usize * sizeof(value_type));
-				mem_free(_pbuf);
-			}
 			_pbuf = pt;
 			_ubufsize = sizeout / sizeof(value_type);
 		}

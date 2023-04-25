@@ -1,11 +1,11 @@
 /*!
 \file ec_file.h
 \author	kipway@outlook.com
-\update 2021.9.29
+\update 2022.11.15
 
 eclib file class
 
-eclib3 Copyright (c) 2017-2020, kipway
+eclib3 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway/eclib
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -290,7 +290,7 @@ namespace ec
 			if (nOpenFlags & OF_APPEND_DATA)
 				oflags |= O_WRONLY | O_APPEND;
 
-			int hFile = ::open64(sfile, oflags, S_IROTH | S_IXOTH | S_IRWXU | S_IRWXG | dwFlag);//must add S_IRWXG usergroup can R&W
+			int hFile = ::open64(sfile, oflags | O_CLOEXEC, S_IROTH | S_IXOTH | S_IRWXU | S_IRWXG | dwFlag);//must add S_IRWXG usergroup can R&W
 
 			if (hFile == INVALID_HANDLE_VALUE)
 				return false;

@@ -2,12 +2,12 @@
 \file ec_text.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.8.31
+\update 2022.12.5
 
 txt
 	const text parse class
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2022, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -63,6 +63,19 @@ namespace ec
 			trimleft();
 			trimright();
 		}
+		bool eq(const char* s) const // equal
+		{
+			if (!s || !_str || !_size)
+				return false;
+			const char* sr = _str;
+			size_t i = _size;
+			while (i && *s) {
+				if (*s++ != *sr++)
+					return false;
+				i--;
+			}
+			return !*s && !i;
+		}
 		bool eq(const txt &v) const // equal
 		{
 			if (v._size != _size)
@@ -75,6 +88,25 @@ namespace ec
 				i--;
 			}
 			return true;
+		}
+		bool ieq(const char* s) const // Case insensitive equal
+		{
+			if (!s || !_str || !_size)
+				return false;
+			const char* sr = _str;
+			size_t i = _size;
+			while (i && *s) {
+				if (*s == *sr) {
+					--i;
+					++s;
+					++sr;
+					continue;
+				}
+				if (tolower(*s++) != tolower(*sr++))
+					return false;
+				--i;
+			}
+			return !*s && !i;
 		}
 		bool ieq(const txt &v) const // Case insensitive equal
 		{
@@ -211,6 +243,28 @@ namespace ec
 				--_size;
 			}
 			return !nk;
+		}
+		inline bool isintstr() const
+		{
+			if (!_str || !_size)
+				return true;
+			size_t i, ns = 0;
+			for (i = 0u; i < _size; i++) {
+				if (_str[i] != '\x20' && _str[i] != '\t')
+					break;
+			}
+			ns = i;
+			for (; i < _size; i++) {
+				if (_str[i] >= '0' && _str[i] <= '9')
+					continue;
+				if (_str[i] == '-') {
+					if (i != ns)
+						return false;
+				}
+				else
+					return false;
+			}
+			return true;
 		}
 	};
 }// ec

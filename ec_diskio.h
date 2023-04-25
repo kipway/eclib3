@@ -496,10 +496,12 @@ namespace ec
 		cdir(const char* utf8path)//spath with'/'
 		{
 #ifdef _WIN32
+			size_t zn = -1;
 			char szFilter[512];
 			hFind = INVALID_HANDLE_VALUE;
 			memset(&FindFileData, 0, sizeof(FindFileData));
-			if (snprintf(szFilter, sizeof(szFilter), "%s*.*", utf8path) < 0)
+			zn = snprintf(szFilter, sizeof(szFilter), "%s*.*", utf8path);
+			if(zn >= sizeof(szFilter))
 				return;
 			wchar_t sfile[512];
 			if (MultiByteToWideChar(ec::strisutf8(szFilter) ? CP_UTF8 : CP_ACP, 0, szFilter, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))

@@ -88,8 +88,10 @@ namespace ec
 		}
 		static void guidstr(ec::t_guid * p, char *sout, size_t outlen) // outlen > 36
 		{
-			snprintf(sout, outlen, "%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X", p->v1, p->v2, p->v3, p->v4[0], p->v4[1],
+			size_t zlen = snprintf(sout, outlen, "%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X", p->v1, p->v2, p->v3, p->v4[0], p->v4[1],
 				p->v4[2], p->v4[3], p->v4[4], p->v4[5], p->v4[6], p->v4[7]);
+			if (zlen >= outlen)
+				sout[outlen - 1] = 0;
 		}
 	};
 }

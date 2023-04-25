@@ -2,7 +2,8 @@
 \file ec_log.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.9.20
+\update 2023.2.5
+2023.2.5 add ipv6 support
 
 ilog
 	A client log base class
@@ -13,7 +14,7 @@ udplog
 prtlog
 	a client log class, print logs to terminal
 
-eclib 3.0 Copyright (c) 2017-2022, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -34,7 +35,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_time.h"
 #include "ec_string.h"
 
-#define EC_LOG_FRM_SIZE (1024 * 60) // MAX size of one log string
+#define EC_LOG_FRM_SIZE (1024 * 30) // MAX size of one log string
 namespace ec
 {
 	static const struct t_loglevel {
@@ -86,7 +87,9 @@ namespace ec
 			}
 			if (!sout || !soutsize)
 				return "ndf"; // not define
-			snprintf(sout, soutsize, "%d", n);
+			size_t zn = snprintf(sout, soutsize, "%d", n);
+			if(zn >= soutsize)
+				return "ndf"; // not define
 			return sout;
 		}
 		static int  level_val(const char* s)
@@ -108,7 +111,7 @@ namespace ec
 	public:
 		udplog(int nlev = CLOG_DEFAULT_MSG) : _level(nlev), _socket(INVALID_SOCKET)
 		{
-			memset(&_srvaddr, 0, sizeof(_srvaddr));
+
 		}
 		virtual ~udplog() {
 			if (_socket != INVALID_SOCKET) {
@@ -150,14 +153,12 @@ namespace ec
 				::closesocket(_socket);
 				_socket = INVALID_SOCKET;
 			}
-			memset(&_srvaddr, 0, sizeof(_srvaddr));
-			_srvaddr.sin_family = AF_INET;
-			_srvaddr.sin_addr.s_addr = inet_addr(purl._ip.c_str());
-			_srvaddr.sin_port = htons(purl._port);
-			_socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+			_srvaddr.set(purl._port, purl.ipstr());
+			_socket = ::socket(_srvaddr.sa_family(), SOCK_DGRAM, IPPROTO_UDP);
 
 			if (INVALID_SOCKET == _socket)
 				return -1;
+			net::setfd_cloexec(_socket);
 			int nval = 1024 * 1024;
 			setsockopt(_socket, SOL_SOCKET, SO_SNDBUF, (char*)&nval, (socklen_t)sizeof(nval));
 			return 0;
@@ -180,20 +181,22 @@ namespace ec
 				return -1;
 			if (_level < level)
 				return 0;
-			char buf[EC_LOG_FRM_SIZE + 80];
-			int nh = snprintf(buf, sizeof(buf), "{\"order\":\"wlog\",\"level\":%d,\"cabin\":\"%s\"}\n", level, _cabin.c_str());
-			if (nh < 0)
+			char buf[EC_LOG_FRM_SIZE];
+			size_t zh = snprintf(buf, sizeof(buf), "{\"order\":\"wlog\",\"level\":%d,\"cabin\":\"%s\"}\n", level, _cabin.c_str());
+			if (zh >= sizeof(buf))
 				return -1;
 			va_list arg_ptr;
 			va_start(arg_ptr, format);
-			int nb = vsnprintf(&buf[nh], EC_LOG_FRM_SIZE, format, arg_ptr);
+			size_t zb = vsnprintf(&buf[zh], sizeof(buf) - zh, format, arg_ptr);
 			va_end(arg_ptr);
-			if (nb <= 0 || nb >= EC_LOG_FRM_SIZE)
+			if (zh + zb >= sizeof(buf))
 				return -1;
+			int addrlen = 0;
+			struct sockaddr* paddr = _srvaddr.getsockaddr(&addrlen);
 #ifdef _WIN32
-			return ::sendto(_socket, buf, nh + nb, 0, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
+			return ::sendto(_socket, buf, (int)(zh + zb), 0, paddr, addrlen);
 #else
-			return ::sendto(_socket, buf, nh + nb, MSG_DONTWAIT, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
+			return ::sendto(_socket, buf, (int)(zh + zb), MSG_DONTWAIT, paddr, addrlen);
 #endif
 		}
 
@@ -203,19 +206,21 @@ namespace ec
 				return -1;
 			if (_level < level)
 				return 0;
-			char buf[EC_LOG_FRM_SIZE + 80];
-			int nh = (subwho && *subwho) ?
+			char buf[EC_LOG_FRM_SIZE];
+			size_t zh = (subwho && *subwho) ?
 				snprintf(buf, sizeof(buf), "{\"order\":\"wlog\",\"level\":%d,\"cabin\":\"%s\"}\n[%s]", level, _cabin.c_str(), subwho) :
 				snprintf(buf, sizeof(buf), "{\"order\":\"wlog\",\"level\":%d,\"cabin\":\"%s\"}\n", level, _cabin.c_str());
-			if (nh < 0)
+			if (zh >= sizeof(buf))
 				return -1;
-			int nb = vsnprintf(&buf[nh], EC_LOG_FRM_SIZE, format, args);
-			if (nb <= 0 || nb >= EC_LOG_FRM_SIZE)
+			size_t zb = vsnprintf(&buf[zh], sizeof(buf) - zh, format, args);
+			if (zh + zb >= sizeof(buf))
 				return -1;
+			int addrlen = 0;
+			struct sockaddr* paddr = _srvaddr.getsockaddr(&addrlen);
 #ifdef _WIN32
-			return ::sendto(_socket, buf, nh + nb, 0, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
+			return ::sendto(_socket, buf, (int)(zh + zb), 0, paddr, addrlen);
 #else
-			return ::sendto(_socket, buf, nh + nb, MSG_DONTWAIT, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
+			return ::sendto(_socket, buf, (int)(zh + zb), MSG_DONTWAIT, paddr, addrlen);
 #endif
 		}
 
@@ -229,20 +234,22 @@ namespace ec
 				return -1;
 			if (_level < level)
 				return 0;
-			char buf[EC_LOG_FRM_SIZE + 80];
-			int nh = snprintf(buf, sizeof(buf), "{\"order\":\"append\",\"level\":%d,\"cabin\":\"%s\"}\n", level, _cabin.c_str());
-			if (nh < 0)
+			char buf[EC_LOG_FRM_SIZE];
+			size_t zh = snprintf(buf, sizeof(buf), "{\"order\":\"append\",\"level\":%d,\"cabin\":\"%s\"}\n", level, _cabin.c_str());
+			if (zh >= sizeof(buf))
 				return -1;
 			va_list arg_ptr;
 			va_start(arg_ptr, format);
-			int nb = vsnprintf(&buf[nh], EC_LOG_FRM_SIZE, format, arg_ptr);
+			size_t zb = vsnprintf(&buf[zh], sizeof(buf) - zh, format, arg_ptr);
 			va_end(arg_ptr);
-			if (nb <= 0 || nb >= EC_LOG_FRM_SIZE)
+			if (zh + zb >= sizeof(buf))
 				return -1;
+			int addrlen = 0;
+			struct sockaddr* paddr = _srvaddr.getsockaddr(&addrlen);
 #ifdef _WIN32
-			return ::sendto(_socket, buf, nh + nb, 0, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
+			return ::sendto(_socket, buf, (int)(zh + zb), 0, paddr, addrlen);
 #else
-			return ::sendto(_socket, buf, nh + nb, MSG_DONTWAIT, (struct sockaddr*)&_srvaddr, sizeof(_srvaddr));
+			return ::sendto(_socket, buf, (int)(zh + zb), MSG_DONTWAIT, paddr, addrlen);
 #endif
 		}
 		virtual int getlevel()
@@ -263,7 +270,7 @@ namespace ec
 	protected:
 		int _level;
 		SOCKET	_socket;
-		struct	sockaddr_in _srvaddr;
+		net::socketaddr _srvaddr;
 		str128 _cabin;
 	};
 

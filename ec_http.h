@@ -2,7 +2,7 @@
 \file ec_http.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.4.21
+\update 2022.4.21
 
 classes for HTTP protocol parse
 
@@ -36,11 +36,11 @@ namespace ec
 		he_failed
 	};
 
-	constexpr const char* http_sret404 = "HTTP/1.0 404  not found!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:60\r\n\r\n"\
+	constexpr const char* http_sret404 = "HTTP/1.1 404  not found!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:60\r\n\r\n"\
 		"<!DOCTYPE html><html><body><p>404 not fund</p></body></html>";
-	constexpr const char* http_sret400 = "HTTP/1.0 400  Bad Request!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:63\r\n\r\n"\
+	constexpr const char* http_sret400 = "HTTP/1.1 400  Bad Request!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:63\r\n\r\n"\
 		"<!DOCTYPE html><html><body><p>400 Bad Request</p></body></html>";
-	constexpr const char* http_sret413 = "HTTP/1.0 413  Payload Too Large!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:76\r\n\r\n"\
+	constexpr const char* http_sret413 = "HTTP/1.1 413  Payload Too Large!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:76\r\n\r\n"\
 		"<!DOCTYPE html><html><body><p>413 Request Entity Too Large</p></body></html>";
 
 	/*!
@@ -175,6 +175,7 @@ namespace ec
 		{
 			pout->clear();
 			char s[64] = { 0 };
+			size_t zn = -1;
 			long long l = v / 1000, lv = 1;
 			while (l) {
 				lv *= 1000;
@@ -182,18 +183,18 @@ namespace ec
 			}
 			while (lv > 1) {
 				if (pout->size())
-					snprintf(s, sizeof(s), ",%03lld", v / lv);
+					zn = snprintf(s, sizeof(s), ",%03lld", v / lv);
 				else
-					snprintf(s, sizeof(s), "%lld", v / lv);
-				pout->append(s, strlen(s));
+					zn = snprintf(s, sizeof(s), "%lld", v / lv);
+				pout->append(s, zn);
 				v %= lv;
 				lv /= 1000;
 			}
 			if (pout->size())
-				snprintf(s, sizeof(s), ",%03lld", v);
+				zn = snprintf(s, sizeof(s), ",%03lld", v);
 			else
-				snprintf(s, sizeof(s), "%lld", v);
-			pout->append(s, strlen(s));
+				zn = snprintf(s, sizeof(s), "%lld", v);
+			pout->append(s, zn);
 			pout->push_back('\0');
 		}
 

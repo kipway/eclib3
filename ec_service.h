@@ -2,11 +2,12 @@
 \file ec_service.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update
+2023.2.13 add run in console for linux
 
 service frame for windows and Linux
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway/eclib
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -40,7 +41,7 @@ class CRunCls //实现这样一个运行类
 {
 public:
 	CRunCls()
-	{		
+	{
 	}
 	~CRunCls()
 	{
@@ -48,7 +49,7 @@ public:
 	
 public:
 	bool start()
-	{		
+	{
 		// todo
 		return true;
 	}
@@ -396,6 +397,7 @@ ec::cUseWS_32 usews32;
 
 #define EC_SERVICE_FRAME(RUNCLS,SSERVICE,SPID,MSGKEY,SBUILD,SVER) int main(int argc, char* argv[])\
 {\
+	_tzset();\
 	RUNCLS *srv = new RUNCLS;\
 	if(argc != 1){\
 		srv->docmd(argc, argv);\
@@ -448,7 +450,7 @@ void ShowMsg()\
 	_tcscat(smsg, SSERVICE);\
 	_tcscat(smsg, _T(" -install\n"));\
 	_tcscat(smsg, SBUILD);\
-	_tcscat(smsg, " \n");\
+	_tcscat(smsg, _T(" \n"));\
 	_tcscat(smsg, SVER);\
 	MessageBox(0, smsg, SSERVICE, MB_OK);\
 }\
@@ -458,6 +460,7 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,\
 	LPTSTR     lpCmdLine,\
 	int       nCmdShow)\
 {\
+	_tzset();\
 	ec::cUseWS_32 usews32;\
 	_server.Init(SSERVICE, SSERVICE, SBUILD);\
 	TCHAR szTokens[] = _T("-/");\
@@ -492,6 +495,7 @@ template<>\
 ec::daemon<RUNCLS>* ec::daemon<RUNCLS>::_pdaemon = &_server;\
 int main(int argc, char** argv)\
 {\
+	_tzset();\
 	printf("\n");\
 	_server.Init(SPID, SSERVICE, SVER, MSGKEY);\
 	if (argc == 2){\
@@ -503,6 +507,8 @@ int main(int argc, char** argv)\
 			_server.status();\
 		else if (!strcasecmp(argv[1], "-ver") || !strcasecmp(argv[1], "-version"))\
 			printf("%s %s %s\n", SSERVICE, SBUILD, SVER); \
+		else if (!strcasecmp(argv[1], "-run"))\
+			_server.run(); \
 		else\
 			_server.docmd(argc,argv);\
 	}\

@@ -2,8 +2,9 @@
 \file ec_netsrv_base.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.8.4
+\update 2023.2.3
 
+// 2023.2.3 upgrade session _ip size for ipv6
 session class for net::server.
 
 net::session
@@ -14,7 +15,7 @@ UCID：Unique ID for the session
 50-999 connect out session ID
 >=1000 connect in session ID
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -135,6 +136,7 @@ namespace ec
 						return false;
 					}
 				}
+				setfd_cloexec(s);
 				_fd = s;
 				return true;
 #else
@@ -302,7 +304,7 @@ namespace ec
 			int32_t  _status;  // session status
 			SOCKET   _fd;
 			uint32_t _ucid;    // Unique serial number
-			char     _ip[40];  // Peer IP address
+			char     _ip[48];  // Peer IP address
 			time_t   _timelastio;  // time last receive/send
 			time_t   _timesndblcok;// Send blocking start time
 			time_t   _time_err;

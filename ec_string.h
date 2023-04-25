@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.9.27
+\update 2023.1.17
 
 string , bytes and string functions
 
@@ -361,7 +361,7 @@ namespace ec
 	public: //Modifiers
 		string_& append(const_pointer s, size_t n) noexcept
 		{
-			if (!s || !*s || !n)
+			if (!s || !n)
 				return *this;
 			size_t zs = size();
 			if (recapacity(zs + n)) {
@@ -1058,9 +1058,11 @@ namespace ec
 		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
 		bool strisascii(const charT* s, size_t size = 0)
 	{// If s is a pure ASCII code or a utf8 string containing only ASCII, it will return true
+		if (!s)
+			return true;
 		const char* pend = s + (size ? size : strlen(s));
 		while (s < pend) {
-			if (*s < 0)
+			if (*s & 0x80)
 				return false;
 			++s;
 		}
@@ -1273,8 +1275,10 @@ namespace ec
 
 	template<typename charT
 		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		int hexview16(const void* psrc, int srclen, charT * sout, size_t sizeout)
-	{//view 16 bytes，return do bytes
+	int hexview16(const void* psrc, int srclen, charT * sout, size_t sizeout, size_t *pzoutsize = nullptr)
+	{ //view 16 bytes，return do bytes
+		if (pzoutsize)
+			*pzoutsize = 0;
 		*sout = 0;
 		if (srclen <= 0 || sizeout < 88u)
 			return -1;
@@ -1316,6 +1320,8 @@ namespace ec
 		}
 		sout[k++] = '\n';
 		sout[k] = '\0';
+		if (pzoutsize)
+			*pzoutsize = k;
 		return n;
 	}
 
@@ -1338,18 +1344,19 @@ namespace ec
 			return so;
 		char stmp[256];
 		int ndo = 0, n = (int)size, nd;
-		size_t zlen = 0;
+		size_t zlen = 0, zall = 0;
 		const uint8_t* p = (uint8_t*)pm;
 		while (n - ndo > 0) {
-			nd = ec::hexview16(p + ndo, n - ndo, stmp, sizeof(stmp));
+			nd = ec::hexview16(p + ndo, n - ndo, stmp, sizeof(stmp), &zlen);
 			if (nd <= 0)
 				break;
-			zlen += strlen(stmp);
-			if(zlen + 1 > sizeout)
-				return so;
-			strcat(so, stmp);
+			if (zall + zlen >= sizeout)
+				break;
+			memcpy(so + zall, stmp, zlen);
+			zall += zlen;
 			ndo += nd;
 		}
+		*(so + zall) = 0;
 		return so;
 	}
 
@@ -1364,15 +1371,16 @@ namespace ec
 	template<class _STR = std::string>
 	void bin2view(const void* pm, size_t size, _STR& sout) {
 		int ndo = 0, nall = size, n;
+		size_t zr;
 		const uint8_t* pu = (const uint8_t*)pm;
-		char stmp[256] = { 0 };
+		char stmp[256];
 		while (ndo < nall) {
-			snprintf(stmp, sizeof(stmp), "%04X-%04X", ndo, ndo + 15);
-			sout.append(stmp);
-			n = ec::hexview16(pu + ndo, nall - ndo, stmp, sizeof(stmp));
+			zr = snprintf(stmp, sizeof(stmp), "%04X-%04X", ndo, ndo + 15);
+			sout.append(stmp, zr);
+			n = ec::hexview16(pu + ndo, nall - ndo, stmp, sizeof(stmp), &zr);
 			if (n <= 0)
 				break;
-			sout.append(stmp);
+			sout.append(stmp, zr);
 			ndo += n;
 		}
 	}

@@ -2,7 +2,7 @@
 \file ec_alloctor.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.10.10
+\update 2022.10.20
 
 memory
 	eclib memory allocator for ec::string, ec::hashmap, and other small objects etc.
@@ -365,14 +365,21 @@ namespace ec{
 			}
 
 			void* pret = nullptr;
+			memheap_* pprior = nullptr;
 			pheap = _phead;
 			while (pheap) {
 				if (nullptr != (pret = pheap->malloc_(size))) {
 					_numfreeblks--;
 					if (poutsize)
 						*poutsize = _sizeblk;
+					if (pprior && pheap->numfree() > 0) { // move to head for next fast malloc
+						pprior->_pnext = pheap->_pnext;
+						pheap->_pnext = _phead;
+						_phead = pheap;
+					}
 					return pret;
 				}
+				pprior = pheap;
 				pheap = pheap->_pnext;
 			}
 			assert(pret != nullptr);
@@ -572,6 +579,26 @@ namespace ec{
 			}
 			printf("}\n\n");
 		}
+
+		void meminfo(std::string &sout) // for debug
+		{
+			char stmp[256];
+			sout.append("\nec::alloctor{\n");
+			for (auto i = 0u; i < _size; i++) {
+				sprintf(stmp, "heaps = %d", _alloctors[i]->numheaps());
+				sout.append(stmp);
+
+				sprintf(stmp, ",blksize = %zu", _alloctors[i]->sizeblk());
+				sout.append(stmp);
+
+				sprintf(stmp, ",numfree = %d", _alloctors[i]->numfreeblks());
+				sout.append(stmp);
+
+				sprintf(stmp, ",calculate = %zu\n", _alloctors[i]->numfree());
+				sout.append(stmp);
+			}
+			sout.append("}\n\n");
+		}
 	};
 
 	constexpr size_t zbaseobjsize = sizeof(memheap_) > sizeof(blk_alloctor<spinlock>) ? sizeof(memheap_) : sizeof(blk_alloctor<spinlock>);
@@ -593,8 +620,8 @@ namespace ec{
 ec::selfalloctor* get_ec_alloctor_self(); //self use global memory allocator for memblk_, blk_alloctor
 
 #define DECLARE_EC_ALLOCTOR ec_allocator_ g_ec_allocator;\
-inline ec::selfalloctor* get_ec_alloctor_self() { return &g_ec_allocator._alloctor_self; }\
-inline ec::allocator* get_ec_allocator() { return &g_ec_allocator._alloctor; }\
+ec::selfalloctor* get_ec_alloctor_self() { return &g_ec_allocator._alloctor_self; }\
+ec::allocator* get_ec_allocator() { return &g_ec_allocator._alloctor; }\
 void* ec::memheap_::operator new(size_t size){\
 	return get_ec_alloctor_self()->malloc_(size);\
 }\

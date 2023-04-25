@@ -2,12 +2,12 @@
 \file ec_tcpclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.8.25
+\update 2023.1.30
 
 tcp_c
 	a class for tcp client, support socks5 proxy, asynchronous connection
 
-eclib 3.0 Copyright (c) 2017-2022, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -35,7 +35,7 @@ namespace ec
 	protected:
 		st_sock	_status;
 		SOCKET _sock;
-		char _sip[40]; //dest IP or socks5 proxy IP
+		char _sip[48]; //dest IP or socks5 proxy IP
 		uint16_t _uport; //dest port or socks5 proxy port
 
 		char _s5domain[40]; //socks5 domain parameter

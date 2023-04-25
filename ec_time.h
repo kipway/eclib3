@@ -2,7 +2,8 @@
 \file ec_time.h
 \author	jiangyong
 \email	kipway@outlook.com
-\update 2021.7.30
+\update
+ 2023.2.22 Fix string2jstime(), update cDateTime
 
 cTime
 	wrapper class for time
@@ -13,7 +14,7 @@ cJobTime
 cBps
 	weighted average traffic count
 
-eclib 3.0 Copyright (c) 2017-2021, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -46,6 +47,10 @@ inline uint64_t GetTickCount64()
 	return tv.tv_sec * 1000 + tv.tv_usec / 1000;
 }
 #endif
+
+#define ECTIME_LOCALSTR 0 // "2023/2/20 12:10:32.123"    lcoal datetime
+#define ECTIME_ISOSTR   1 // "2023-2-20T12:10:32.123+08:00"  ISO 8601
+#define ECTIME_STAMP    2 // 1676866232123     UTC milliseconds since 1970-1-1
 
 namespace ec
 {
@@ -144,33 +149,32 @@ namespace ec
 #endif
 	}
 
-	template<class _Str = std::string>
-	bool jstime2string(int64_t ltime, _Str& sout)
+	inline bool gmtime_(struct tm* ptm, time_t gmt)
 	{
-		time_t gmt = ltime / 1000;
-		struct tm t;
 #ifdef _WIN32
-		if (gmtime_s(&t, &gmt))
+		if (gmtime_s(ptm, &gmt))
 			return false;
 #else
-		if (!gmtime_r(&gmt, &t))
+		if (!gmtime_r(&gmt, ptm))
 			return false;
 #endif
-		char buf[40] = { 0 };
-		int n = snprintf(buf, sizeof(buf), "%d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-			t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
-			t.tm_hour, t.tm_min, t.tm_sec, (int)(ltime % 1000)
-		);
-		if (n < 0 || n >= (int)sizeof(buf))
-			return false;
-		sout.append(buf, n);
 		return true;
 	}
 
-	template<class _Str = std::string>
-	bool jstime2localstring(int64_t ltime, _Str& sout)// sout use append, ISO 8601
+	inline bool localtime_(struct tm* ptm, time_t gmt)
 	{
-		time_t gmt = ltime / 1000;
+#ifdef _WIN32
+		if (localtime_s(ptm, &gmt))
+			return false;
+#else
+		if (!localtime_r(&gmt, ptm))
+			return false;
+#endif
+		return true;
+	}
+
+	inline bool localtime__(time_t gmt, int* pyear, int* pmon, int* pday, int* phour, int* pmin, int* psec)
+	{
 		struct tm tml;
 #ifdef _WIN32
 		if (localtime_s(&tml, &gmt))
@@ -178,135 +182,239 @@ namespace ec
 #else
 		if (!localtime_r(&gmt, &tml))
 			return false;
-#endif
-		char buf[40] = { 0 };
-		int n = snprintf(buf, sizeof(buf), "%d-%02d-%02dT%02d:%02d:%02d.%03d",
-			tml.tm_year + 1900, tml.tm_mon + 1, tml.tm_mday,
-			tml.tm_hour, tml.tm_min, tml.tm_sec, (int)(ltime % 1000)
-		);
-		if (n < 0 || n >= (int)sizeof(buf))
-			return false;
-		sout.append(buf, n);
-		int timez = timezone();
-		if (!timez)
-			sout += 'Z';
-		else {
-			sout += (timez < 0) ? '+' : '-';
-			sout += abs(timez) / 10 ? '0' + abs(timez) / 10 : '0';
-			sout += '0' + abs(timez) % 10;
-			sout.append(":00");
-		}
+#endif	
+		* pyear = tml.tm_year + 1900;
+		*pmon = tml.tm_mon + 1;
+		*pday = tml.tm_mday;
+		*phour = tml.tm_hour;
+		*pmin = tml.tm_min;
+		*psec = tml.tm_sec;
 		return true;
 	}
 
-	// stime support RFC2822 and ISO 8601
-	//   2021-12-31T12:32:25.987+08:00
-	//   2021-12-31T04:32:25.987Z
-	//   2021-12-31T12:32:25.987+0800
-	inline int64_t string2jstime(const char* stime, size_t zlen) //return javascript timestamp
+	inline time_t mktime_(int nyear, int nmon, int nday, int nhour = 0, int nmin = 0, int nsec = 0)
 	{
-		char s[40] = { 0 };
-		if (zlen >= sizeof(s))
+		struct tm t;
+		t.tm_year = nyear - 1900;
+		t.tm_mon = nmon - 1;
+		t.tm_mday = nday;
+		t.tm_hour = nhour;
+		t.tm_min = nmin;
+		t.tm_sec = nsec;
+		t.tm_wday = 0;
+		t.tm_yday = 0;
+		t.tm_isdst = 0;
+		return mktime(&t);
+	}
+
+	inline const char* jstime2string(int64_t ltime, char* sout, size_t outsize, int isutc = 1, size_t* pzoutsize = nullptr) //输出jstime，isutc != 0 为0时区
+	{
+		if (pzoutsize)
+			*pzoutsize = 0;
+		*sout = 0;
+		struct tm t;
+		if (isutc) {
+			if (!ec::gmtime_(&t, (time_t)(ltime / 1000)))
+				return nullptr;
+		}
+		else {
+			if (!ec::localtime_(&t, (time_t)(ltime / 1000)))
+				return nullptr;
+		}
+		size_t n = (size_t)snprintf(sout, outsize, "%d-%02d-%02dT%02d:%02d:%02d.%03d",
+			t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+			t.tm_hour, t.tm_min, t.tm_sec, (int)(ltime % 1000));
+
+		if (isutc) {
+			if ( n + 1 >= outsize) {
+				*sout = 0;
+				return nullptr;
+			}
+			sout[n++] = 'Z';
+		}
+		else {
+			int timez = timezone();
+			if (!timez) {
+				if ( n + 1 >= outsize) {
+					*sout = 0;
+					return nullptr;
+				}
+				sout[n++] = 'Z';
+			}
+			else {
+				if ( n + 6 >= outsize) {
+					*sout = 0;
+					return nullptr;
+				}
+				sout[n++] = (timez < 0) ? '+' : '-';
+				sout[n++] = abs(timez) / 10 ? '0' + abs(timez) / 10 : '0';
+				sout[n++] = '0' + abs(timez) % 10;
+				sout[n++] = ':';
+				sout[n++] = '0';
+				sout[n++] = '0';
+			}
+		}
+		sout[n] = 0;
+		if (pzoutsize)
+			*pzoutsize = n;
+		return sout;
+	}
+
+	template<class _Str = std::string>
+	bool jstime2string(int64_t ltime, _Str& sout, int utc = 1)// sout use append, ISO 8601,utc != 0 为0时区
+	{
+		size_t zn = 0;
+		char sbuf[48];
+		if (!jstime2string(ltime, sbuf, sizeof(sbuf), utc, &zn))
+			return false;
+		sout.append(sbuf, zn);
+		return true;
+	}
+
+	inline const char* jstime2localstring(int64_t ltime, char* sout, size_t outsize, size_t* pzoutsize = nullptr)
+	{
+		return jstime2string(ltime, sout, outsize, 0, pzoutsize);
+	}
+
+	template<class _Str = std::string>
+	bool jstime2localstring(int64_t ltime, _Str& sout)// sout use append, ISO 8601
+	{
+		size_t zn = 0;
+		char sbuf[48];
+		if (!jstime2string(ltime, sbuf, sizeof(sbuf), 0, &zn))
+			return false;
+		sout.append(sbuf, zn);
+		return true;
+	}
+
+	/**
+	 * @brief Parse the number split by cp
+	 * @param s like "12:32:24"
+	 * @param cp like ':'
+	 * @param pn out buffer
+	 * @param nmax maximum number
+	 * @return return the number of parsed integers
+	*/
+	inline int splitint(char* s, char cp, int* pn, int nmax)
+	{
+		if (!s || !*s)
+			return 0;
+		int n = 0;
+		char* ps = s, * si = s;
+		while (*ps && n < nmax) {
+			if (*ps == cp) {
+				*ps = 0;
+				pn[n++] = (*si) ? atoi(si) : 0;
+				si = ps + 1;
+			}
+			++ps;
+		}
+		if (n < nmax && *si)
+			pn[n++] = atoi(si);
+		return n;
+	}
+
+	/**
+	 * @brief parse datetime to timestamp
+	 * @param sdatetime:
+	 * datetime with timezone ISO 8601
+		 2023-2-31T04:32:25.987Z
+		 2023-2-31T12:32:25.987+0800
+		 2023-2-31T12:32:25.987+08:00
+		 2023-2-31T12:32:25+08:00
+		 2023-2-31T12:32+08:00
+		 2023-2-31T12+08:00
+	   local datetime
+		 2023-1-31 12:32:25.987
+		 2023-1-31 12:32:25
+		 2023-1-31 12:32
+		 2023-1-31 12
+		 2023-1-31
+	 * @param zlen, length of sdatetime
+	 * @return -1:error; >=0 UTC milliseconds since 1970-1-1
+	*/
+	inline int64_t string2jstime(const char* sdatetime, size_t zlen)
+	{
+		int zonexs = -1, iso8601 = 0, ndp = 0;
+		char s[48];
+		if (!sdatetime || zlen >= sizeof(s))
 			return -1;
-		memcpy(s, stime, zlen);
+		memcpy(s, sdatetime, zlen);
+		s[zlen] = 0;
 		char* ps = s, * pdate = s, * ptime = nullptr, * pms = nullptr, * pzone = nullptr;
 		while (*ps) {
-			if (*ps == 'T' || *ps == ' ' || *ps == 't') {
+			switch (*ps) {
+			case 'T':
+				if (2 != ndp)
+					return -1;
 				*ps = 0;
 				ptime = ps + 1;
-			}
-			else if (*ps == '.') {
+				iso8601 = 1;
+				break;
+			case '\x20':
+				if (!ptime && 2 == ndp && *(ps - 1) >= '0' && *(ps - 1) <= '9') {
+					*ps = 0;
+					ptime = ps + 1;
+				}
+				break;
+			case '.':
 				*ps = 0;
 				pms = ps + 1;
-			}
-			else if (*ps == 'Z' || *ps == 'z')
 				break;
-			else if (*ps == '+') {
-				*ps = 0;
-				pzone = ps + 1;
-			}
-			else if (*ps == '-' && ptime) {
-				*ps = 0;
-				pzone = ps + 1;
-			}
-			++ps;
-		}
-		int ymd[3] = { 0 }, n;
-		ps = pdate;
-
-		char* st = ps;
-		n = 0;
-		while (*ps) {
-			if (*ps == '-' || *ps == '/') {
-				*ps = 0;
-				ymd[n++] = atoi(st);
-				if (n == 2) {
-					++ps;
-					if (*ps)
-						ymd[n++] = atoi(ps);
-					break;
+			case '+':
+				if (ptime && iso8601) {
+					*ps = 0;
+					pzone = ps + 1;
 				}
-				st = ps + 1;
+				break;
+			case '-':
+				if (ptime && iso8601) {
+					*ps = 0;
+					zonexs = 1;
+					pzone = ps + 1;
+				}
+				else
+					++ndp;
+				break;
+			case '/':
+				*ps = '-';
+				++ndp;
+				break;
 			}
 			++ps;
 		}
 
+		int ymd[3] = { 0 }, hms[3] = { 0 }, ms = 0, zsec = 0, n = 0;
+		n = splitint(pdate, '-', ymd, 3);//date
 		if (n != 3 || ymd[0] < 1970 || ymd[0] > 3000 || ymd[1] < 1 || ymd[1] > 12 || ymd[2] < 1 || ymd[2] > 31)
 			return -1;
 
-		int hms[3] = { 0 };
-		n = 0;
-		if (ptime) {
-			ps = ptime;
-			st = ps;
-			n = 0;
-			while (*ps) {
-				if (*ps == ':') {
-					*ps = 0;
-					hms[n++] = atoi(st);
-					if (n == 2) {
-						++ps;
-						if (*ps)
-							hms[n++] = atoi(ps);
-						break;
-					}
-					st = ps + 1;
-				}
-				++ps;
-			}
-		}
-		if (n != 3 || hms[0] < 0 || hms[0] > 23 || hms[1] < 0 || ymd[1] > 59 || ymd[2] < 0 || ymd[2] > 59)
+		n = splitint(ptime, ':', hms, 3);//time
+		if (hms[0] < 0 || hms[0] > 23 || hms[1] < 0 || hms[1] > 59 || hms[2] < 0 || hms[2] > 59)
 			return -1;
 
-		int ms = 0;
-		if (pms)
+		if (pms)//msec
 			ms = atoi(pms);
 		if (ms < 0 || ms > 999)
 			return -1;
 
-		int zsec = 0;
-		if (pzone) {
-			if (pzone[0] < '0' || pzone[0] > '9' || pzone[1] < '0' || pzone[1] > '9')
+		if (iso8601 && pzone) {// timezone offset
+			int zone[2] = { 0 };
+			n = splitint(pzone, ':', zone, 2);
+			if (n == 1) { // 0800 no ':'
+				zone[1] = zone[0] % 100;
+				zone[0] = zone[0] / 100;
+			}
+			if (zone[0] * 100 + zone[1] > 1200 || zone[0] < 0 || zone[1] < 0)
 				return -1;
-			zsec = 3600 * (pzone[0] - '0') * 10 + 3600 * (pzone[1] - '0');
-			if (*(pzone - 1) == '-')
-				zsec *= -1;
+			zsec = 3600 * zone[0] + 60 * zone[1];
+			zsec *= zonexs;
 		}
 
-		time_t ltime = 0;
-		struct tm t;
-		memset(&t, 0, sizeof(t));
-
-		t.tm_year = ymd[0] - 1900;
-		t.tm_mon = ymd[1] - 1;
-		t.tm_mday = ymd[2];
-
-		t.tm_hour = hms[0];
-		t.tm_min = hms[1];
-		t.tm_sec = hms[2];
-
-		ltime = mktime(&t) + timezone() * 3600 + zsec;
-		return (int64_t)ltime * 1000ll + ms;
+		time_t ltime = ec::mktime_(ymd[0], ymd[1], ymd[2], hms[0], hms[1], hms[2]) + zsec;
+		if (ptime && iso8601)
+			ltime -= timezone() * 3600;
+		return (int64_t)(ltime * 1000ll + ms);
 	}
 
 	class cTime
@@ -317,47 +425,17 @@ namespace ec
 			, _hour(0), _min(0), _sec(0)
 		{
 		}
-		cTime(time_t gmt) :cTime()
+		cTime(time_t gmt)
 		{
 			SetTime(gmt);
-		}
-		cTime(int nyear, int nmon, int nday) :cTime()
-		{
-			SetTime(nyear, nmon, nday);
-		}
-		cTime(int nyear, int nmon, int nday, int nhour, int nmin, int nsec) :cTime()
+		};
+		cTime(int nyear, int nmon, int nday, int nhour = 0, int nmin = 0, int nsec = 0)
 		{
 			SetTime(nyear, nmon, nday, nhour, nmin, nsec);
-		}
-		~cTime() {};
-		void SetTime(int nyear, int nmon, int nday)
+		};
+		void SetTime(int nyear, int nmon, int nday, int nhour = 0, int nmin = 0, int nsec = 0)
 		{
-			struct tm t;
-			memset(&t, 0, sizeof(t));
-			t.tm_year = nyear - 1900;
-			t.tm_mon = nmon - 1;
-			t.tm_mday = nday;
-			_gmt = mktime(&t);
-
-			_year = nyear;
-			_mon = nmon;
-			_day = nday;
-			_hour = 0;
-			_min = 0;
-			_sec = 0;
-		}
-		void SetTime(int nyear, int nmon, int nday, int nhour, int nmin, int nsec)
-		{
-			struct tm t;
-			memset(&t, 0, sizeof(t));
-			t.tm_year = nyear - 1900;
-			t.tm_mon = nmon - 1;
-			t.tm_mday = nday;
-			t.tm_hour = nhour;
-			t.tm_min = nmin;
-			t.tm_sec = nsec;
-			_gmt = mktime(&t);
-
+			_gmt = ec::mktime_(nyear, nmon, nday, nhour, nmin, nsec);
 			_year = nyear;
 			_mon = nmon;
 			_day = nday;
@@ -365,32 +443,15 @@ namespace ec
 			_min = nmin;
 			_sec = nsec;
 		}
-
 		inline time_t GetTime() const
 		{
 			return _gmt;
-		}
+		};
 		void SetTime(time_t gmt)
 		{
 			_gmt = gmt;
-			struct tm tml;
-			struct tm* ptm = &tml;
-#ifdef _WIN32
-			if (localtime_s(&tml, &_gmt))
-				ptm = nullptr;
-#else
-			if (!localtime_r(&_gmt, &tml))
-				ptm = nullptr;
-#endif
-			if (ptm) {
-				_year = ptm->tm_year + 1900;
-				_mon = ptm->tm_mon + 1;
-				_day = ptm->tm_mday;
-				_hour = ptm->tm_hour;
-				_min = ptm->tm_min;
-				_sec = ptm->tm_sec;
-			}
-			else {
+			if (!ec::localtime__(gmt, &_year, &_mon, &_day, &_hour, &_min, &_sec)) {
+				_gmt = -1;
 				_year = 1970;
 				_mon = 1;
 				_day = 1;
@@ -419,32 +480,50 @@ namespace ec
 			else
 				return snprintf(sout, sizeout, "%d/%02d/%02d", _year, _mon, _day);
 		}
+		const char* toisostring(char* sout, size_t sizeout, int msec = 0, size_t *pzoutsize = nullptr)// ISO 8601
+		{
+			if (pzoutsize)
+				*pzoutsize = 0;
+			*sout = 0;
+			if (_gmt < 0)
+				return nullptr;
+			size_t n = snprintf(sout, sizeout, "%04d-%02d-%02dT%02d:%02d:%02d.%03d",
+				_year, _mon, _day, _hour, _min, _sec, msec);
+			if ( n + 6 >= sizeout) {
+				*sout = 0;
+				return nullptr;
+			}
+			int timez = timezone();
+			if (!timez)
+				sout[n++] = 'Z';
+			else {
+				sout[n++] = (timez < 0) ? '+' : '-';
+				sout[n++] = abs(timez) / 10 ? '0' + abs(timez) / 10 : '0';
+				sout[n++] = '0' + abs(timez) % 10;
+				sout[n++] = ':';
+				sout[n++] = '0';
+				sout[n++] = '0';
+			}
+			sout[n] = 0;
+			if (pzoutsize)
+				*pzoutsize = n;
+			return sout;
+		}
 
 		template<class _Str = std::string>
 		bool tojslocalstring(_Str& sout, int msec = 0)// sout use append, ISO 8601
 		{
-			char buf[40] = { 0 };
-			int n = snprintf(buf, sizeof(buf), "%d-%02d-%02dT%02d:%02d:%02d.%03d",
-				_year, _mon, _day, _hour, _min, _sec, msec
-			);
-			if (n < 0 || n >= (int)sizeof(buf))
+			size_t zn = 0;
+			char buf[48];
+			if (!toisostring(buf, sizeof(buf), msec, &zn))
 				return false;
-			sout.append(buf, n);
-			int timez = timezone();
-			if (!timez)
-				sout += 'Z';
-			else {
-				sout += timez < 0 ? '+' : '-';
-				sout += abs(timez) / 10 ? '0' + abs(timez) / 10 : '0';
-				sout += '0' + abs(timez) % 10;
-				sout.append(":00");
-			}
+			sout.append(buf, zn);
 			return true;
 		}
 
 		int weekday()   // 1=monday,..., 7=sunday, 0:error
 		{
-			if (!_gmt)
+			if (_gmt <= 0)
 				return 0;
 			return ((_gmt / 86400) % 7 + 3) % 7 + 1;// 1970/1/1 is Thursday
 		}
@@ -455,10 +534,12 @@ namespace ec
 	};
 
 	/*!
-	\brief date time
+	\brief local date time
 	fmt:
 	yyyy/mm/dd HH:MM:SS  or yyyy/mm/dd HH:MM:SS.mmm
 	yyyy-mm-dd HH:MM:SS  or yyyy-mm-dd HH:MM:SS.mmm
+
+	2023.2.19 update support ISO8601
 	*/
 	class cDateTime
 	{
@@ -475,118 +556,85 @@ namespace ec
 		{
 			return _gmt > 0;
 		}
-		bool parse(const char* s)
-		{
+		bool parse_n(const char* stime, size_t zlen) {
 			_gmt = -1;
-			char sd[16] = { 0 }, st[16] = { 0 }, sf[8] = { 0 };
-			size_t pos = 0, nsize = strlen(s);
-			if (!ec::strnext('\x20', s, nsize, pos, sd, sizeof(sd)))
+			char s[48];
+			if (!stime || !zlen || !*stime || zlen >= sizeof(s))
 				return false;
-			ec::strnext('\x20', s, nsize, pos, st, sizeof(st));
-			int np = 0, n = 0;
-			char* sp = sd;
-			while (*sp) {
-				if (*sp == '/' || *sp == '-') {
-					sf[n++] = 0;
-					np++;
-					if (np > 2)
-						return false;
-					if (np == 1)
-						_nyear = atoi(sf);
-					else if (np == 2)
-						_nmon = atoi(sf);
-					n = 0;
-				}
-				else if (*sp < '0' || *sp > '9')
-					return false;
-				else {
-					sf[n++] = *sp;
-					if (n >= 7)
-						return false;
-				}
-				sp++;
-			}
-			if (np != 2 || !n)
+			memcpy(s, stime, zlen);
+			s[zlen] = 0;
+
+			int64_t ltime = string2jstime(s, zlen);
+			if (ltime < 0)
 				return false;
-			sf[n] = 0;
-			_nday = atoi(sf);
-			_nhour = 0;
-			_nmin = 0;
-			_nsec = 0;
-			_nmsec = 0;
-			if (st[0]) { //has time filed
-				np = 0;
-				n = 0;
-				sp = st;
-				while (*sp) {
-					if (*sp == ':') {
-						sf[n++] = 0;
-						np++;
-						if (np > 2)
-							return false;
-						if (np == 1)
-							_nhour = atoi(sf);
-						else if (np == 2)
-							_nmin = atoi(sf);
-						n = 0;
-					}
-					else if (*sp == '.') {
-						sf[n++] = 0;
-						np++;
-						if (np == 3) {
-							_nsec = atoi(sf);
-							if (_nsec > 59 || _nsec < 0)
-								return false;
-						}
-						n = 0;
-					}
-					else if (*sp < '0' || *sp > '9')
-						return false;
-					else {
-						sf[n++] = *sp;
-						if (n >= 7)
-							return false;
-					}
-					sp++;
-				}
-				if (np < 2 || !n)
-					return false;
-				sf[n] = 0;
-				if (np == 2)
-					_nsec = atoi(sf);
-				else if (np == 3)
-					_nmsec = atoi(sf);
-				if (_nmsec < 0 || _nmsec > 999)
-					return false;
-			}
-			if (_nyear < 1970 || _nmon > 12 || _nmon < 1 || _nday > 31 || _nday < 1
-				|| _nhour > 23 || _nhour < 0 || _nmin < 0 || _nmin > 59 || _nsec < 0 || _nsec > 59)
-				return false;
-			ec::cTime t(_nyear, _nmon, _nday, _nhour, _nmin, _nsec);
-			_gmt = t.GetTime();
-			if (_gmt < 0)
-				return false;
-			ec::cTime t2(_gmt);
-			if (t2._year != _nyear || t2._mon != _nmon || t2._day != _nday
-				|| t2._hour != _nhour || t2._min != _nmin || t2._sec != _nsec) {
+			_gmt = (time_t)(ltime / 1000);
+			_nmsec = (int)(ltime % 1000);
+
+			if (!ec::localtime__(_gmt, &_nyear, &_nmon, &_nday, &_nhour, &_nmin, &_nsec)) {
 				_gmt = -1;
+				_nyear = 1970;
+				_nmon = 1;
+				_nday = 1;
+				_nhour = 0;
+				_nmin = 0;
+				_nsec = 0;
+				_nmsec = 0;
 				return false;
 			}
 			return true;
 		}
-		bool parse_n(const char* s, size_t len)
+		bool parse(const char* s)
 		{
-			char st[32] = { 0 };
-			if (len >= sizeof(st))
+			if (!s || !*s) {
+				_gmt = -1;
 				return false;
-			memcpy(st, s, len);
-			return parse(st);
+			}
+			return parse_n(s, strlen(s));
 		}
 		int weekday()   // 1=monday,..., 7=sunday, 0:error ; Note that it is GMT
 		{
-			if (!_gmt)
+			if (_gmt <= 0)
 				return 0;
 			return ((_gmt / 86400) % 7 + 3) % 7 + 1; // 1970/1/1 is Thursday
+		}
+		const char* toisostring(char* sout, size_t sizeout, size_t *pzoutsize = nullptr)// ISO 8601
+		{
+			if (pzoutsize)
+				*pzoutsize = 0;
+			*sout = 0;
+			if (_gmt < 0)
+				return nullptr;
+			size_t n = snprintf(sout, sizeout, "%04d-%02d-%02dT%02d:%02d:%02d.%03d",
+				_nyear, _nmon, _nday, _nhour, _nmin, _nsec, _nmsec);
+			if ( n + 6 >= sizeout) {
+				*sout = 0;
+				return nullptr;
+			}
+			int timez = timezone();
+			if (!timez)
+				sout[n++] = 'Z';
+			else {
+				sout[n++] = (timez < 0) ? '+' : '-';
+				sout[n++] = abs(timez) / 10 ? '0' + abs(timez) / 10 : '0';
+				sout[n++] = '0' + abs(timez) % 10;
+				sout[n++] = ':';
+				sout[n++] = '0';
+				sout[n++] = '0';
+			}
+			sout[n] = 0;
+			if (pzoutsize)
+				*pzoutsize = n;
+			return sout;
+		}
+		template<class _Str = std::string>
+		bool tojslocalstring(_Str& sout)// sout use append, ISO 8601
+		{
+			size_t zn = 0;
+			char buf[48];
+			if (!toisostring(buf, sizeof(buf), &zn))
+				return false;
+			sout.append(buf, zn);
+			return true;
 		}
 	};
 
