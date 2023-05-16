@@ -1,12 +1,13 @@
 ﻿/*!
-\file ec_array.h
+\file ec_string.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.1.17
+\update 
+2023.5.15 move ec::string to ec_string.hpp
 
-string , bytes and string functions
+string tips
 
-eclib 3.0 Copyright (c) 2017-2022, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,9 +28,9 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #define _to_lower(a) (((a) >= 'A' && (a) <= 'Z') ? (a)+32 : (a))	// ('a'-'A') = 32
 
 #include "ec_text.h"
-#include "ec_vector.h"
 #include "ec_array.h"
 #include "ec_alloctor.h"
+#include "ec_string.hpp"
 namespace std
 {
 	using bytes = basic_string<uint8_t, char_traits<uint8_t>, ec::std_allocator<uint8_t>>; // std::bytes
@@ -40,8 +41,6 @@ namespace std
 
 namespace ec
 {
-	using bytes = vector<unsigned char>;
-
 	using str32 = array<char, 32>;
 	using str64 = array<char, 64>;
 	using str80 = array<char, 80>;
@@ -51,581 +50,7 @@ namespace ec
 	using str1k = array<char, 1024>;
 
 	using strargs = array<txt, 128>; //for ec::strsplit  out buffer
-
-	struct null_stralloctor	{ // use C malloc
-		void* malloc_(size_t zr, size_t* poutsize)
-		{
-			if (zr % 16u)
-				zr += 16u - zr % 16u;
-			if (zr + zr / 2u < UINT32_MAX /2u - 1024u)
-				zr += zr / 2u; // 1.5x size
-			if (zr < 64u)
-				zr = 64u;
-			return ::malloc(zr);
-		}
-
-		void free_(void* p) {
-			::free(p);
-		}
-	};
-
-	struct ec_string_alloctor { // use ec_alloctor
-		void* malloc_(size_t size, size_t* poutsize)
-		{
-			if (size > get_ec_allocator()->maxblksize()) { // use ::malloc, 1.5x size
-				size = (size % 8) ? (size + 8u - size % 8u) : size;
-				return get_ec_allocator()->malloc_(size + size / 2u, poutsize);
-			}
-			return get_ec_allocator()->malloc_(size, poutsize);
-		}
-
-		void free_(void* p) {
-			get_ec_allocator()->free_(p);
-		}
-	};
-
-	template<class _Alloctor = null_stralloctor,
-		typename size_type = uint32_t, 
-		typename chart = char,
-		class = typename std::enable_if<sizeof(chart) == 1>::type> // just support char and unsigned char
-	class string_ // basic_string
-	{
-	public:
-		using value_type = chart;
-		using pointer = chart*;
-		using const_pointer = const chart*;
-		using iterator = chart*;
-		using const_iterator = const chart*;
-		using reference = chart&;
-		using const_reference = const chart&;
-
-		struct t_h {
-			size_type sizebuf; // not include head
-			size_type sizedata;// not include null
-		};
-	private:
-		pointer _pstr;
-	private:
-		pointer smalloc(size_t strsize)
-		{
-			if (strsize > max_size())
-				return nullptr;
-
-			size_t zr = strsize + sizeof(t_h) + 1;
-			pointer pstr = (pointer)_Alloctor().malloc_(zr, &zr);
-			
-			if (pstr) {
-				t_h* ph = (t_h*)pstr;
-				ph->sizebuf = (size_type)(zr - sizeof(t_h));
-				ph->sizedata = 0;
-				pstr += sizeof(t_h);
-			}
-			return pstr;
-		}
-
-		void sfree(pointer &str)
-		{
-			if (str) {
-				_Alloctor().free_(str - sizeof(t_h));
-				str = nullptr;
-			}
-		}
-
-		bool recapacity(size_t strsize)
-		{
-			if (!strsize) {
-				sfree(_pstr);
-				return true;
-			}
-			if (strsize <= capacity())
-				return true;
-			if (!_pstr) {
-				_pstr = smalloc(strsize);
-				return nullptr != _pstr;
-			}
-			size_t zd = ssize(_pstr);
-			pointer pnewstr = smalloc(strsize);
-			if (!pnewstr)
-				return false;
-			memcpy(pnewstr, _pstr, zd);
-			setsize_(pnewstr, zd);
-			sfree(_pstr);
-			_pstr = pnewstr;
-			return true;
-		}
-
-		void setsize_(pointer pstr, size_t zlen)
-		{
-			if (!pstr)
-				return;
-			t_h* ph = (t_h*)(pstr - sizeof(t_h));
-			ph->sizedata = (size_type)zlen;
-		}
-
-		size_t ssize(const_pointer pstr) const
-		{
-			if (!pstr)
-				return 0;
-			const t_h* ph = (const t_h*)(pstr - sizeof(t_h));
-			return ph->sizedata;
-		}
-
-		size_t scapacity(const_pointer pstr) const
-		{
-			if (!pstr)
-				return 0;
-			const t_h* ph = (const t_h*)(pstr - sizeof(t_h));
-			return ph->sizebuf - 1;
-		}
-	public:
-		string_() : _pstr(nullptr) {
-		}
-
-		string_(const char* s) : _pstr(nullptr)
-		{
-			if (!s || !*s)
-				return;
-			append(s, strlen(s));
-		}
-
-		string_(const_pointer s, size_t size) : _pstr(nullptr)
-		{
-			append(s, size);
-		}
-
-		string_(const string_& str) : _pstr(nullptr)
-		{
-			append(str.data(), str.size());
-		}
-
-		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
-		string_(const _Str& str) : _pstr(nullptr)
-		{
-			append(str.data(), str.size());
-		}
-
-		~string_() {
-			sfree(_pstr);
-		}
-
-		string_(string_<_Alloctor, size_type>&& str) noexcept // move construct
-		{
-			_pstr = str._pstr;
-			str._pstr = nullptr;
-		}
-
-		string_& operator= (string_<_Alloctor, size_type>&& v) // for move
-		{
-			sfree(_pstr);
-			_pstr = v._pstr;
-			v._pstr = nullptr;
-			return *this;
-		}
-
-		operator pointer()
-		{
-			if (!_pstr)
-				return (pointer)"";// never return nullptr
-			_pstr[size()] = 0;
-			return _pstr;
-		}
-
-		void swap(string_<_Alloctor, size_type>& str) //simulate move
-		{
-			pointer stmp = _pstr;
-			_pstr = str._pstr;
-			str._pstr = stmp;
-		}
-
-		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
-		string_& operator= (const _Str &str)
-		{
-			clear();
-			return append(str.data(), str.size());
-		}
-
-		inline string_& operator= (const string_& str)
-		{
-			clear();
-			return append(str.data(), str.size());
-		}
-
-		inline string_& operator= (const char* s)
-		{
-			clear();
-			return append(s);
-		}
-
-		string_& operator= (char c)
-		{
-			clear();
-			if (recapacity(1)) {
-				_pstr[0] = c;
-				setsize_(_pstr, 1);
-			}
-			return *this;
-		}
-
-	public: //Iterators
-
-		inline iterator begin() noexcept
-		{
-			return _pstr;
-		}
-
-		inline const_iterator begin() const noexcept
-		{
-			return _pstr;
-		}
-
-		inline iterator end() noexcept
-		{
-			return _pstr ? _pstr + size() : nullptr;
-		}
-
-		inline const_iterator end() const noexcept
-		{
-			return _pstr ? _pstr + size() : nullptr;
-		}
-
-		inline const_iterator cbegin() const noexcept
-		{
-			return _pstr;
-		}
-
-		inline const_iterator cend() const noexcept
-		{
-			return _pstr ? _pstr + size() : nullptr;
-		}
-
-	public: // Capacity
-
-		static inline size_t max_size()
-		{
-			return static_cast<size_type>(-1) - 32u;
-		}
-
-		inline size_t size() const noexcept
-		{
-			return ssize(_pstr);
-		}
-
-		inline size_t length() const noexcept
-		{
-			return ssize(_pstr);
-		}
-
-		inline size_t capacity() const noexcept
-		{
-			return scapacity(_pstr);
-		}
-
-		inline void reserve(size_t n = 0) noexcept
-		{
-			recapacity(n);
-		}
-
-		inline void clear() noexcept
-		{
-			setsize_(_pstr, 0);
-		}
-
-		inline bool empty() const noexcept
-		{
-			return !size();
-		}
-
-	public: //Element access
-		inline reference operator[] (size_t pos) noexcept
-		{
-			return _pstr[pos];
-		}
-		inline const_reference operator[] (size_t pos) const noexcept
-		{
-			return _pstr[pos];
-		}
-
-	public: // String operations:
-		const_pointer data() const noexcept
-		{
-			return _pstr;
-		}
-		const_pointer c_str() const noexcept
-		{
-			if (!_pstr)
-				return "";// never return nullptr
-			_pstr[size()] = 0;
-			return _pstr;
-		}
-
-	public: //Modifiers
-		string_& append(const_pointer s, size_t n) noexcept
-		{
-			if (!s || !n)
-				return *this;
-			size_t zs = size();
-			if (recapacity(zs + n)) {
-				memcpy(_pstr + zs, s, n);
-				setsize_(_pstr, zs + n);
-			}
-			return *this;
-		}
-
-		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
-		inline string_& append(const _Str& str) noexcept
-		{
-			return append(str.data(), str.size());
-		}
-
-		string_& append(const char* s) noexcept
-		{
-			if (!s || !*s)
-				return *this;
-			return append(s, strlen(s));
-		}
-
-		string_& append(value_type c) noexcept
-		{
-			size_t zs = size();
-			if (recapacity(zs + 1)) {
-				_pstr[zs] = c;
-				setsize_(_pstr, zs + 1);
-			}
-			return *this;
-		}
-
-		string_& assign(string_<_Alloctor, size_type>&& v) noexcept
-		{
-			sfree(_pstr);
-			_pstr = v._pstr;
-			v._pstr = nullptr;
-			return *this;
-		}
-
-		inline string_& assign(const_pointer s, size_t n) noexcept
-		{
-			clear();
-			return append(s, n);
-		}
-
-		string_& assign(const char* s) noexcept
-		{
-			clear();
-			if (!s || !*s)
-				return *this;
-			return append(s, strlen(s));
-		}
-		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
-		inline string_& assign(const _Str& str)
-		{
-			clear();
-			return append(str.data(), str.size());
-		}
-
-		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
-		inline string_& operator+= (const _Str& str)
-		{
-			return append(str.data(), str.size());
-		}
-
-		inline string_& operator+= (const char* s) noexcept
-		{
-			return append(s);
-		}
-
-		inline string_& operator+= (value_type c) noexcept
-		{
-			return append(c);
-		}
-
-		inline void push_back(value_type c) noexcept
-		{
-			append(c);
-		}
-
-		void pop_back() noexcept
-		{
-			size_t zlen = size();
-			if (zlen > 0)
-				setsize_(_pstr, zlen - 1);
-		}
-
-		inline const_reference back() const
-		{
-			return _pstr[size() - 1];
-		}
-
-		inline reference back()
-		{
-			return _pstr[size() - 1];
-		}
-
-		void resize(size_t n, char c = 0) noexcept
-		{
-			size_t zlen = size();
-			if (zlen > n)
-				setsize_(_pstr, n);
-			else if (n < zlen) {
-				if (recapacity(n)) {
-					memset(_pstr + zlen, c, n - zlen);
-					setsize_(_pstr, n);
-				}
-			}
-		}
-
-		string_& insert(size_t pos, const_pointer s, size_t n) noexcept
-		{
-			if (!s || !*s || !n)
-				return *this;
-			size_t zlen = size();
-			if (pos >= zlen)
-				return append(s, n);
-			if (zlen + n > capacity()) {
-				pointer pnewstr = smalloc(zlen + n);
-				if (!pnewstr)
-					return *this;
-				if (pos)
-					memcpy(pnewstr, _pstr, pos);
-				memcpy(pnewstr + pos, s, n);
-				memcpy(pnewstr + pos + n, _pstr + pos, zlen - pos);
-				setsize_(pnewstr, zlen + n);
-				sfree(_pstr);
-				_pstr = pnewstr;
-				return *this;
-			}
-			memmove(_pstr + pos + n, _pstr + pos, zlen - pos);
-			memcpy(_pstr + pos, s, n);
-			setsize_(_pstr, zlen + n);
-			return *this;
-		}
-
-		string_& insert(size_t pos, const char* s) noexcept
-		{
-			if (!s || !*s)
-				return *this;
-			return insert(pos, s, strlen(s));
-		}
-
-		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
-		inline string_& insert(size_t pos, const _Str& str) noexcept
-		{
-			return insert(pos, str.data(), str.size());
-		}
-
-		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
-		string_& insert(size_t pos, const _Str& str,
-			size_t subpos, size_t sublen) noexcept
-		{
-			if (subpos >= str.size() || !sublen)
-				return *this;
-			if (sublen > str.size())
-				sublen = str.size();
-			if (subpos + sublen > str.size())
-				sublen = str.size() - subpos;
-			return insert(pos, str.data() + subpos, sublen);
-		}
-
-		string_& erase(size_t pos = 0, size_t len = (size_t)(-1)) noexcept
-		{
-			if (!pos && len == (size_t)(-1)) {
-				clear();
-				return *this;
-			}
-			size_t datasize = size();
-			if (!len || empty() || pos >= datasize)
-				return *this;
-			if (len == (size_t)(-1) || pos + len >= datasize) {
-				setsize_(_pstr, pos);
-				return *this;
-			}
-			memmove(_pstr + pos, _pstr + pos + len, datasize - pos - len);
-			setsize_(_pstr, datasize - len);
-			return *this;
-		}
-
-		string_& replace(size_t pos, size_t len, const_pointer s, size_t n) noexcept
-		{
-			if (!s || !*s || !n)
-				return erase(pos, len);
-			if (!len)
-				return insert(pos, s, n);
-			erase(pos, len);
-			return insert(pos, s, n);
-		}
-
-		string_& replace(size_t pos, size_t len, const char* s) noexcept
-		{
-			if (!s || !*s)
-				return erase(pos, len);
-			return replace(pos, len, s, strlen(s));
-		}
-
-		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
-		inline string_& replace(size_t pos, size_t len, const _Str& str) noexcept
-		{
-			return replace(pos, len, str.data(), str.size());
-		}
-
-		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
-		inline int compare(const _Str& str) const  noexcept
-		{
-			return ::strcmp(c_str(), str.c_str());
-		}
-
-		int compare(const char* s) const  noexcept
-		{
-			if (!s)
-				return false;
-			return ::strcmp(c_str(), s);
-		}
-
-		template<typename _Str, class = typename std::enable_if<std::is_class<_Str>::value>::type>
-		bool operator== (const _Str& str)
-		{
-			return (size() == str.size() && size() && !memcmp(_pstr, str.data(), str.size()));
-		}
-
-#ifdef _WIN32
-		bool format(const char * format, ...)
-#else
-		bool format(const char * format, ...) __attribute__((format(printf, 2, 3)))
-#endif
-		{
-			int n = 0;
-			clear();
-			if (!recapacity(200 - sizeof(t_h) - 1))
-				return false;
-			else {
-				va_list arg_ptr;
-				va_start(arg_ptr, format);
-				n = vsnprintf(_pstr, capacity(), format, arg_ptr);
-				va_end(arg_ptr);
-			}
-			if (n < 0)
-				return false;
-			if (n <= (int)capacity()) {
-				setsize_(_pstr, n);
-				return true;
-			}
-
-			if (!recapacity(n))
-				return false;
-			else {
-				va_list arg_ptr;
-				va_start(arg_ptr, format);
-				n = vsnprintf(_pstr, capacity(), format, arg_ptr);
-				va_end(arg_ptr);
-			}
-			if (n >= 0 && n <= (int)capacity()) {
-				setsize_(_pstr, n);
-				return true;
-			}
-			return false;
-		}
-	}; // string_
-
-	using string = string_<ec_string_alloctor>;
-
+	
 	inline int stricmp(const char*s1, const char*s2)
 	{
 		if (s1 == s2)
@@ -637,9 +62,7 @@ namespace ec
 #endif
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		size_t strlcpy(charT* sd, const charT* ss, size_t count)
+	inline 	size_t strlcpy(char* sd, const char* ss, size_t count)
 	{// like strlcpy for linux,add null to the end of sd,return strlen(ss)
 		if (!ss || !(*ss)) {
 			if (sd && count)
@@ -659,8 +82,7 @@ namespace ec
 		return srclen;
 	}
 
-	template<typename charT>
-	char *strncpy_s(charT *dest, size_t destsize, const charT* src, size_t srcsize)
+	inline char *strncpy_s(char *dest, size_t destsize, const char* src, size_t srcsize)
 	{ // safe copy, always adding a null character at the end of dest
 		if (!dest || !destsize)
 			return dest;
@@ -671,13 +93,12 @@ namespace ec
 
 		if (destsize <= srcsize)
 			srcsize = destsize - 1;
-		memcpy(dest, src, srcsize * sizeof(charT));
+		memcpy(dest, src, srcsize);
 		dest[srcsize] = '\0';
 		return dest;
 	}
 
-	template<typename charT>
-	bool streq(const charT* s1, const charT* s2)
+	inline bool streq(const char* s1, const char* s2)
 	{ // return true: equal; false not equal
 		if (!s1 || !s2)
 			return false;
@@ -688,8 +109,7 @@ namespace ec
 		return *s1 == '\0' && *s2 == '\0';
 	}
 
-	template<typename charT>
-	bool strieq(const charT* s1, const charT* s2)
+	inline bool strieq(const char* s1, const char* s2)
 	{ //case insensitive equal. return true: equal; false not equal
 		if (s1 == s2)
 			return true;
@@ -703,8 +123,7 @@ namespace ec
 #endif
 	}
 
-	template<typename charT>
-	bool strineq(const charT* s1, const charT* s2, size_t s2size, bool balls1 = false)// Judge n characters equal case insensitive
+	inline bool strineq(const char* s1, const char* s2, size_t s2size, bool balls1 = false)// Judge n characters equal case insensitive
 	{
 		if (!s1 || !s2)
 			return false;
@@ -720,10 +139,8 @@ namespace ec
 			return !*s1 && i == s2size;
 		return i == s2size;
 	}
-
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		void strtrim(charT *s, const charT* flt = "\x20\t\n\r")
+	
+	inline void strtrim(char *s, const char* flt = "\x20\t\n\r")
 	{
 		if (!*s)
 			return;
@@ -754,12 +171,10 @@ namespace ec
 		\param pos [in/out] current position
 		\param sout [out] output buffer
 		\param outsize output buffer length
-		*/
-
-	template<typename charT>
-	const char* strnext(const charT cp, const charT* src, size_t srcsize, size_t &pos, charT *sout, size_t outsize)
+	*/
+	inline const char* strnext(const char cp, const char* src, size_t srcsize, size_t &pos, char *sout, size_t outsize)
 	{
-		charT c;
+		char c;
 		size_t i = 0;
 		while (pos < srcsize) {
 			c = src[pos++];
@@ -804,10 +219,9 @@ namespace ec
 	\param outsize output buffer length
 	*/
 
-	template<typename charT>
-	const char* strnext(const charT* split, const charT* src, size_t srcsize, size_t &pos, charT *sout, size_t outsize)
+	inline const char* strnext(const char* split, const char* src, size_t srcsize, size_t &pos, char *sout, size_t outsize)
 	{
-		charT c;
+		char c;
 		size_t i = 0;
 		while (pos < srcsize) {
 			c = src[pos++];
@@ -842,8 +256,7 @@ namespace ec
 		return nullptr;
 	}
 
-	template<typename charT>
-	bool char2hex(charT c, unsigned char *pout)
+	inline bool char2hex(char c, unsigned char *pout)
 	{
 		if (c >= 'a' && c <= 'f')
 			*pout = 0x0a + (c - 'a');
@@ -939,27 +352,24 @@ namespace ec
 		return str;
 #endif
 	}
-
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		size_t struppercpy(charT* sd, const charT* ss, size_t count)
+	
+	inline size_t struppercpy(char* sd, const char* ss, size_t count)
 	{// like strlcpy for linux,add null to the end of sd,return strlen(ss)
-		charT* d = sd;
-		const charT* s = ss;
+		char* d = sd;
+		const char* s = ss;
 		size_t n = count;
-		charT ch;
+		char ch;
 
-		if (s == 0 || d == 0) return 0;
+		if (!d)
+			return 0;
 
 		if (!s) {
 			*d = 0;
-			return d;
+			return 0;
 		}
 		/* Copy as many bytes as will fit */
-		if (n != 0 && --n != 0)
-		{
-			do
-			{
+		if (n != 0 && --n != 0) {
+			do {
 				ch = *s++;
 				if ((*d++ = _to_upper(ch)) == 0)
 					break;
@@ -967,38 +377,34 @@ namespace ec
 		}
 
 		/* Not enough room in dst, add NUL and traverse rest of src */
-		if (n == 0)
-		{
+		if (n == 0) {
 			if (count != 0)
-				*d = '\0';                /* NUL-terminate dst */
+				*d = '\0';  /* NUL-terminate dst */
 			while (*s++)
 				;
 		}
 
-		return(s - ss - 1);        /* count does not include NUL */
+		return(s - ss - 1); /* count does not include NUL */
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		size_t strlowercpy(charT* sd, const charT* ss, size_t count)
+	inline size_t strlowercpy(char* sd, const char* ss, size_t count)
 	{// like strlcpy for linux,add null to the end of sd,return strlen(ss)
-		charT* d = sd;
-		const charT* s = ss;
+		char* d = sd;
+		const char* s = ss;
 		size_t n = count;
-		charT ch;
+		char ch;
 
-		if (s == 0 || d == 0) return 0;
+		if (!d)
+			return 0;
 
 		if (!s) {
 			*d = 0;
-			return d;
+			return 0;
 		}
 
 		/* Copy as many bytes as will fit */
-		if (n != 0 && --n != 0)
-		{
-			do
-			{
+		if (n != 0 && --n != 0) {
+			do {
 				ch = *s++;
 				if ((*d++ = _to_lower(ch)) == 0)
 					break;
@@ -1006,20 +412,16 @@ namespace ec
 		}
 
 		/* Not enough room in dst, add NUL and traverse rest of src */
-		if (n == 0)
-		{
+		if (n == 0) {
 			if (count != 0)
-				*d = '\0';                /* NUL-terminate dst */
+				*d = '\0';   /* NUL-terminate dst */
 			while (*s++)
 				;
 		}
-
-		return(s - ss - 1);        /* count does not include NUL */
+		return(s - ss - 1);  /* count does not include NUL */
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		bool strisutf8(const charT* s, size_t size = 0)
+	inline bool strisutf8(const char* s, size_t size = 0)
 	{ //return true if s is utf8 string
 		if (!s)
 			return true;
@@ -1053,10 +455,8 @@ namespace ec
 		}
 		return !nb;
 	}
-
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		bool strisascii(const charT* s, size_t size = 0)
+	
+	inline bool strisascii(const char* s, size_t size = 0)
 	{// If s is a pure ASCII code or a utf8 string containing only ASCII, it will return true
 		if (!s)
 			return true;
@@ -1069,9 +469,7 @@ namespace ec
 		return true;
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		int utf82gbk(const charT* in, size_t sizein, char *out, size_t sizeout)
+	inline int utf82gbk(const char* in, size_t sizein, char *out, size_t sizeout)
 	{ //return number bytes write to out or -1 error
 		*out = 0;
 		if (!in || !(*in))
@@ -1123,9 +521,8 @@ namespace ec
 #endif
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		int gbk2utf8(const charT* in, size_t sizein, char *out, size_t sizeout)
+	
+	inline int gbk2utf8(const char* in, size_t sizein, char *out, size_t sizeout)
 	{ //return number bytes write to out or -1 error
 		*out = 0;
 		if (!in || !(*in))
@@ -1232,9 +629,7 @@ namespace ec
 		return n;
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		void hex2str(const void* psrc, size_t sizesrc, charT *sout, size_t outsize)
+	inline void hex2str(const void* psrc, size_t sizesrc, char *sout, size_t outsize)
 	{
 		unsigned char uc;
 		size_t i;
@@ -1248,9 +643,7 @@ namespace ec
 		sout[2 * i] = 0;
 	}
 
-	template<typename ucharT
-		, class = typename std::enable_if<std::is_same<ucharT, unsigned char>::value>::type>
-		void xor_le(ucharT* pd, int size, unsigned int umask)
+	inline void xor_le(unsigned char* pd, int size, unsigned int umask)
 	{ // little endian fast XOR,4x faster than byte-by-byte XOR
 		if (!size)
 			return;
@@ -1273,9 +666,7 @@ namespace ec
 			pd[i] ^= (umask >> ((i % 4) * 8)) & 0xFF;
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-	int hexview16(const void* psrc, int srclen, charT * sout, size_t sizeout, size_t *pzoutsize = nullptr)
+	inline int hexview16(const void* psrc, int srclen, char * sout, size_t sizeout, size_t *pzoutsize = nullptr)
 	{ //view 16 bytes，return do bytes
 		if (pzoutsize)
 			*pzoutsize = 0;
@@ -1333,9 +724,7 @@ namespace ec
 	39 D2 CD 22 D6 A7 2C 08    EF F4 BC 00 00 08 00 3D    9.."..,........=
 	00 3C 00 35 00 2F 01 00                               .<.5./..
 	*/
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		const char* bin2view(const void* pm, size_t size, charT *so, size_t sizeout)
+	inline const char* bin2view(const void* pm, size_t size, char *so, size_t sizeout)
 	{
 		if (!so)
 			return nullptr;
@@ -1434,9 +823,7 @@ namespace ec
 		\param sfliter [in] filter str
 		\return true success
 		*/
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		bool strfilter(const charT *ssrc, const charT *sfliter)
+	inline bool strfilter(const char *ssrc, const char *sfliter)
 	{
 		char ssub[512], cp = 0;
 		char *ps = ssub, *ss = (char *)ssrc, *sf = (char *)sfliter;
@@ -1524,8 +911,7 @@ namespace ec
 		return pos;
 	}
 
-	template<typename charT, class = typename std::enable_if<sizeof(charT) == 1>::type>
-	size_t utf8_substr(charT *s, size_t size, size_t sublen)
+	inline size_t utf8_substr(char *s, size_t size, size_t sublen)
 	{ // truncate string no greater than sublen, return substr size
 		if (size <= sublen)
 			return size;
@@ -1543,8 +929,7 @@ namespace ec
 		return pos;
 	}
 
-	template<typename charT, class = typename std::enable_if<sizeof(charT) == 1>::type>
-	size_t utf8_sizesubstr(const charT* s, size_t size, size_t sublen)
+	inline size_t utf8_sizesubstr(const char* s, size_t size, size_t sublen)
 	{ // return substr size no greater than sublen
 		if (size < sublen)
 			return size;
@@ -1561,8 +946,7 @@ namespace ec
 		return pos;
 	}
 
-	template<typename charT, class = typename std::enable_if<sizeof(charT) == 1>::type>
-	size_t utf8cpy(charT* sd, size_t sized, const charT* ss, size_t sizes)
+	inline size_t utf8cpy(char* sd, size_t sized, const char* ss, size_t sizes)
 	{ //add null to end, return copy size
 		if (!ss || !(*ss)) {
 			if (sd && sized)
@@ -1578,8 +962,7 @@ namespace ec
 		return zcp;
 	}
 
-	template<typename charT, class = typename std::enable_if<sizeof(charT) == 1>::type>
-	size_t utf8_strlcpy(charT* sd, const charT* ss, size_t count)
+	inline size_t utf8_strlcpy(char* sd, const char* ss, size_t count)
 	{// like strlcpy for linux,add null to the end of sd,return strlen(ss), count is sd size
 		if (!ss || !(*ss)) {
 			if (sd && count)
@@ -1597,9 +980,7 @@ namespace ec
 		return srclen;
 	}
 
-	template<typename charT
-		, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-		bool jstr_needesc(const charT* src, size_t srcsize)
+	inline bool jstr_needesc(const char* src, size_t srcsize)
 	{
 		bool besc = false;
 		for (auto i = 0u; i < srcsize; i++) {
@@ -1651,8 +1032,7 @@ namespace ec
 		return so.c_str();
 	}
 
-	template<typename charT>
-	bool strneq(const charT* s1, const charT* s2, size_t  n)
+	inline bool strneq(const char* s1, const char* s2, size_t  n)
 	{
 		if (!s1 || !s2)
 			return false;
@@ -1666,8 +1046,7 @@ namespace ec
 		return i == n;
 	}
 
-	template<typename charT>
-	bool strnieq(const charT* s1, const charT* s2, size_t  n)
+	inline bool strnieq(const char* s1, const char* s2, size_t  n)
 	{
 		if (!s1 || !s2)
 			return false;

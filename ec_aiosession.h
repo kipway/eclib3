@@ -80,7 +80,7 @@ namespace ec {
 					memcpy(_inbuf, pfrm, frmsize);
 				}
 				else {
-					_pfrmbuf = get_ec_allocator()->malloc_(_frmsize);
+					_pfrmbuf = ec_malloc(_frmsize);
 					if (!_pfrmbuf) {
 						_frmsize = 0;
 						return;
@@ -91,7 +91,7 @@ namespace ec {
 			virtual ~udp_frm_()
 			{
 				if (_pfrmbuf) {
-					get_ec_allocator()->free_(_pfrmbuf);
+					ec_free(_pfrmbuf);
 					_pfrmbuf = nullptr;
 				}
 				_frmsize = 0;
@@ -132,6 +132,7 @@ namespace ec {
 		class ssext_data // application session extension data
 		{
 		public:
+			_USE_EC_OBJ_ALLOCATOR
 			ssext_data() {
 			}
 			virtual ~ssext_data() {
@@ -162,7 +163,8 @@ namespace ec {
 		private:
 			ssext_data* _pextdata; //application session extension data
 		public:
-			session(blk_alloctor<>* pblkallocator, int fd, ec::memory* piomem, int fdlisten = -1)
+			_USE_EC_OBJ_ALLOCATOR
+			session(blk_alloctor<>* pblkallocator, int fd, int fdlisten = -1)
 				: _keyid(fd)
 				, _fd(fd)
 				, _fdlisten(fdlisten)
@@ -174,7 +176,6 @@ namespace ec {
 				, _allsend(0)
 				, _allrecv(0)
 				, _mstime_connected(ec::mstime())
-				, _rbuf(piomem)
 				, _sndbuf(EC_AIO_SNDBUF_MAXSIZE, pblkallocator)
 				, _peerport(0)
 				, _epollevents(0)

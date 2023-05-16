@@ -3,7 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update 2023.2.3
-
+2023.5.13 remove ec::memory
 2023.2.3 optimize ipv6
 2023.1.27 add ipv6 tcp server
 
@@ -49,7 +49,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #endif
 
 #ifndef SIZE_TCP_READ_ONCE
-#	define SIZE_TCP_READ_ONCE (64 * 1024)
+#	define SIZE_TCP_READ_ONCE (16 * 1024)
 #endif
 
 #define EC_NET_SRV_TCP  0 // TCP server
@@ -59,7 +59,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #define EC_NET_SRV_TCPIPV6  10 // ipv6 TCP server
 #define EC_NET_SRV_UDPIPV6  12 // ipv6 UDP server
 
-#include "ec_vector.h"
+#include "ec_alloctor.h"
 #include "ec_netio.h"
 #include "ec_string.h"
 #include "ec_netio.h"
@@ -110,10 +110,9 @@ namespace ec
 			}
 		protected:
 			hashmap<uint32_t, t_listen> _maplisten;
-			memory* _pmem; // Memory allocator
 			ilog* _plog;
-			vector<pollfd> _pollfd;
-			vector<uint32_t> _pollkey;
+			std::vector<pollfd, ec::std_allocator<pollfd>> _pollfd;
+			std::vector<uint32_t, ec::std_allocator<uint32_t>> _pollkey;
 		protected:
 			hashmap<uint32_t, PNETSS, keq_netss, del_netss> _map;
 			bool _bmodify_pool; // true:session poll changed
@@ -132,27 +131,22 @@ namespace ec
 			evtfd _evtfd; // event for application
 			char _sucidfile[512];//ucid save file,if nullstring ,use memory ucid from UCID_DYNAMIC_START
 		private:
-			bytes _udpbuf;
+			uint8_t _udpbuf[1024 * 64 - 24];
 			char _recvtmp[SIZE_TCP_READ_ONCE];
 		public:
-			server(memory* pmem, ilog* plog)
-				: _pmem(pmem)
-				, _plog(plog)
-				, _pollfd(pmem)
-				, _pollkey(pmem)
+			server(ilog* plog)
+				: _plog(plog)
 				, _nerr_emfile_count(0)
 				, _unextid(UCID_DYNAMIC_START)
 				, _unextsrvid(0)
 				, _pkgflag_size(3)
 				, _sndbufblks(EC_NET_SNDBUF_BLOCKSIZE - EC_ALLOCTOR_ALIGN, EC_NET_SNDBUF_HEAPSIZE / EC_NET_SNDBUF_BLOCKSIZE)
-				, _udpbuf(pmem)
 			{
 				_pollkey.reserve(1024);
 				_bmodify_pool = _evtfd.open();
 				_time_lastrun = 0;
 				memset(_sucidfile, 0, sizeof(_sucidfile));
 				_pauseread = 0;
-				_udpbuf.reserve(1024 * 64);
 			}
 			size_t get_pkgflag_size() {
 				return _pkgflag_size;
@@ -244,7 +238,7 @@ namespace ec
 					ni.key = nextsrvid();
 				else
 					ni.key = listenid;
-				listen_session *p = new listen_session(ni.key, ni._fd, _pmem, _plog, &_sndbufblks);
+				listen_session *p = new listen_session(ni.key, ni._fd, _plog, &_sndbufblks);
 				if (!p) {
 					::closesocket(ni._fd);
 					return 0;
@@ -278,7 +272,7 @@ namespace ec
 					ni.key = nextsrvid();
 				else
 					ni.key = ucid;
-				listen_session *p = new listen_session(ni.key, ni._fd, _pmem, _plog, &_sndbufblks);
+				listen_session *p = new listen_session(ni.key, ni._fd, _plog, &_sndbufblks);
 				if (!p) {
 					::closesocket(ni._fd);
 					return 0;
@@ -304,7 +298,7 @@ namespace ec
 					ni.key = nextsrvid();
 				else
 					ni.key = ucid;
-				listen_session *p = new listen_session(ni.key, ni._fd, _pmem, _plog, &_sndbufblks);
+				listen_session *p = new listen_session(ni.key, ni._fd, _plog, &_sndbufblks);
 				if (!p) {
 					::closesocket(ni._fd);
 					return 0;
@@ -356,7 +350,7 @@ namespace ec
 				ni._srvtype = srvtype;
 				ni._fd = s;
 
-				session_udpsrv* p = new session_udpsrv(ni.key, ni._fd, _pmem, _plog, &_sndbufblks);
+				session_udpsrv* p = new session_udpsrv(ni.key, ni._fd, _plog, &_sndbufblks);
 				if (!p) {
 					::closesocket(ni._fd);
 					return 0;
@@ -577,7 +571,7 @@ namespace ec
 		protected:
 			//2023-2-5 for support ipv6 src_addr is sockaddr* , sa_family decision is sockaddr_in* or sockaddr_in6*
 			virtual bool onmessage(int listenid, uint32_t ucid, uint32_t protoc, bytes &pkgr, const struct sockaddr_in *src_addr) = 0; // 调度和处理消息, return false will disconnect
-
+			virtual bool onmessage_udp(int listenid, uint32_t ucid, uint32_t protoc, const uint8_t *pkgr, size_t pkgsize, const struct sockaddr_in* src_addr) = 0; // 调度和处理消息, return false will disconnect
 			virtual void onconnect(int listenid, uint32_t ucid) = 0;
 			virtual void onaccept(int listenid, SOCKET sock)
 			{
@@ -761,11 +755,9 @@ namespace ec
 								int nr, nnum = 5;
 								do{
 									--nnum;
-									_udpbuf.clear();
-									nr = ::recvfrom(p[i].fd, (char*)_udpbuf.data(), (int)_udpbuf.capacity(), 0, paddr, paddrlen);
+									nr = ::recvfrom(p[i].fd, (char*)_udpbuf, (int)sizeof(_udpbuf), 0, paddr, paddrlen);
 									if (nr > 0) {
-										_udpbuf.resize(nr);
-										onmessage(ps->_listenid, puid[i], EC_NET_SRV_UDP, _udpbuf, (const struct sockaddr_in*)paddr);
+										onmessage_udp(ps->_listenid, puid[i], EC_NET_SRV_UDP, _udpbuf, nr, (const struct sockaddr_in*)paddr);
 									}
 								} while (nr > 0 && nnum > 0);
 								p[i].events = POLLIN;
@@ -1094,7 +1086,7 @@ namespace ec
 				}
 				setfd_cloexec(sAccept);
 				onaccept(listenid, sAccept);
-				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog, &_sndbufblks);
+				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _plog, &_sndbufblks);
 				if (!pi) {
 					::closesocket(sAccept);
 					return false;
@@ -1170,7 +1162,7 @@ namespace ec
 				setfd_cloexec(sAccept);
 				tcpnodelay(sAccept);
 				setkeepalive(sAccept);
-				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog, &_sndbufblks);
+				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _plog, &_sndbufblks);
 				if (!pi) {
 					::closesocket(sAccept);
 					return false;
@@ -1232,7 +1224,7 @@ namespace ec
 				setfd_cloexec(sAccept);
 				tcpnodelay(sAccept);
 				setkeepalive(sAccept);
-				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _pmem, _plog, &_sndbufblks);
+				PNETSS pi = new session(listenid, nextid(), sAccept, EC_NET_SS_TCP, EC_NET_ST_CONNECT, _plog, &_sndbufblks);
 				if (!pi) {
 					::closesocket(sAccept);
 					return false;
@@ -1277,7 +1269,7 @@ namespace ec
 					return;
 
 				pi->_timelastio = ::time(0);
-				bytes msgr(_pmem);
+				bytes msgr;
 				msgr.reserve(1024 * 32);
 				int ndo = pi->onrecvbytes((const uint8_t*)_recvtmp, nr, &msgr);
 				if (ndo < 0) {

@@ -1,7 +1,7 @@
 ﻿/*!
 \file ec_recfile.h
 \author	kipway@outlook.com
-\update 2020.12.16
+\update 2021.9.30
 
 eclib file class
 
@@ -215,7 +215,7 @@ namespace ec
 				uflag |= OF_SYNC;
 			if (!Open(sdbfile, uflag, OF_SHARE_READ))
 				return -1;
-			while (1) {
+			do{
 				unique_filelock flck(this, 0, 0, true);
 				char head[RFL_HEADSIZE] = { 0 };
 				t_head* ph = (t_head*)&head;
@@ -242,20 +242,14 @@ namespace ec
 					return -1;
 				}
 
-				memset(head, 0, sizeof(head));
-				size_t i, n = sizepagetable() / RFL_HEADSIZE;
-				for (i = 0; i < n; i++) {
-					if (Write(head, sizeof(head)) < 0) {
-						File::Close();
-						return -1;
-					}
-				}
-
 				memset(_pgtab, 0, sizepagetable());
+				if (Write(_pgtab, sizepagetable()) < 0) {
+					File::Close();
+					return -1;
+				}
 				_filesize = Seek(0, seek_end);
 				flush();
-				break;
-			}
+			}while (0);
 			_errcode = 0;
 			return 0;
 		}
@@ -263,13 +257,16 @@ namespace ec
 		/*!
 		\brief open an exist file
 		*/
-		int open_file(const char* sdbfile, const char * sappflag = nullptr)
+		int open_file(const char* sdbfile, const char * sappflag = nullptr, bool bsync = true)
 		{
-			if (!Open(sdbfile, OF_RDWR | OF_SYNC, OF_SHARE_READ)) {
+			uint32_t uflag = OF_RDWR;
+			if (bsync)
+				uflag |= OF_SYNC;
+			if (!Open(sdbfile, uflag, OF_SHARE_READ)) {
 				_errcode = RFLE_NOTEXIST;
 				return -1;
 			}
-			while (1) {
+			do {
 				unique_filelock flck(this, 0, 0, false);
 				char head[RFL_HEADSIZE] = { 0 };
 				t_head* ph = (t_head*)&head;
@@ -327,8 +324,7 @@ namespace ec
 				if (RFL_ERR_POS == _nextpgpos)
 					_nextpgpos = urecs * 8u;
 				_filesize = Seek(0, seek_end);
-				break;
-			}
+			} while (0);
 			_errcode = 0;
 			return 0;
 		}

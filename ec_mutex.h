@@ -2,7 +2,7 @@
 \file ec_mutex.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.4.26
+\update 2020.9.15
 
 class unique_lock;
 class spinlock;

@@ -43,21 +43,7 @@ namespace ec
 			template <typename... Args>
 			t_node(Args&&... args) : pNext(nullptr), value(std::forward<Args>(args)...) {
 			}
-			static void* operator new(size_t size)
-			{
-				return get_ec_allocator()->malloc_(size);
-			}
-			static void operator delete(void* p)
-			{
-				get_ec_allocator()->free_(p);
-			}
-			static void* operator new(size_t size, void* ptr)
-			{
-				return ptr;
-			}
-			static void operator delete(void* ptr, void* voidptr2) noexcept
-			{
-			}
+			_USE_EC_OBJ_ALLOCATOR
 		};
 	protected:
 		t_node* _phead;
@@ -162,6 +148,18 @@ namespace ec
 				_ptail->pNext = pnode;
 				_ptail = pnode;
 			}
+			++_size;
+		}
+		template <typename... Args>
+		void emplacefront(Args&&... args)
+		{
+			t_node* pnode = new t_node(std::forward<Args>(args)...);
+			if (!pnode)
+				return;
+			pnode->pNext = _phead;
+			if (!_ptail)
+				_ptail = pnode;
+			_phead = pnode;
 			++_size;
 		}
 	};

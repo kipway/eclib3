@@ -2,8 +2,8 @@
 \file ec_netsrv_wss.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.8.4
-
+\update 2023.5.13
+2023.5.13 remove ec::memory
 net::session_wss
 	websocket over HTTPS(TLS1.2) session
 
@@ -32,7 +32,7 @@ namespace ec
 			\brief construct for update session
 			*/
 			session_wss(session_tls&& ss) : session_tls(std::move(ss)),
-				base_ws(session_tls::_ucid, _pssmem, _psslog)
+				base_ws(session_tls::_ucid, _psslog)
 			{
 				_protoc = EC_NET_SS_HTTPS;
 			}
@@ -51,7 +51,7 @@ namespace ec
 			virtual int onrecvbytes(const void* pdata, size_t size, bytes* pmsgout)
 			{
 				_timelastio = ::time(nullptr);
-				bytes data(_pssmem);
+				bytes data;
 				data.reserve(1024 * 20);
 				int nr = session_tls::onrecvbytes(pdata, size, &data);
 				if (nr < 0)

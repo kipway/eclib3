@@ -2,7 +2,7 @@
 \file ec_system.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.5.26
+\update 2023.5.13
 
 eclib, easy C/C++ Library,based on C++11
 
@@ -37,6 +37,8 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #	ifndef _NOTUSE_WINSOCKET
 #		include <Winsock2.h>
 #		pragma comment(lib,"Ws2_32.lib")
+#		include <mswsock.h>
+#		pragma comment(lib,"Mswsock.lib")
 #	endif
 
 #else
@@ -78,3 +80,5 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include <cstdlib>
 #include <cstdio>
 #include <cstdint>
+
+#define _ZLIB_SELF_ALLOC

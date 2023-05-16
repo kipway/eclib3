@@ -2,8 +2,8 @@
 \file ec_http.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.4.21
-
+\update 2023.5.13
+2023.5.13 use zlibe self memory allocator
 classes for HTTP protocol parse
 
 eclib 3.0 Copyright (c) 2017-2020, kipway
@@ -488,7 +488,16 @@ namespace ec
 				return (int)size;
 			}
 		};
-
+#ifdef _ZLIB_SELF_ALLOC
+		inline void* zlib_alloc(void* opaque, uInt items, uInt size)
+		{
+			return ec_malloc(items * size);
+		}
+		inline void zlib_free(void* opaque, void* pf)
+		{
+			ec_free(pf);
+		}
+#endif
 		/*!
 		\brief parse http package
 		*/
@@ -662,8 +671,13 @@ namespace ec
 				stream.next_in = (z_const Bytef *)pSrc;
 				stream.avail_in = (uInt)size_src;
 
+#ifdef _ZLIB_SELF_ALLOC
+				stream.zalloc = ec::http::zlib_alloc;
+				stream.zfree = ec::http::zlib_free;
+#else
 				stream.zalloc = (alloc_func)0;
 				stream.zfree = (free_func)0;
+#endif
 				stream.opaque = (voidpf)0;
 
 				err = deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, gzip ? 31 : MAX_WBITS, 8, Z_DEFAULT_STRATEGY); // windowBits <0 deflate;  8~15 zlib format; > 15 gzip format; abs() <=MAX_WBITS
@@ -700,8 +714,13 @@ namespace ec
 				stream.next_in = (z_const Bytef *)pSrc;
 				stream.avail_in = (uInt)size_src;
 
+#ifdef _ZLIB_SELF_ALLOC
+				stream.zalloc = ec::http::zlib_alloc;
+				stream.zfree = ec::http::zlib_free;
+#else
 				stream.zalloc = (alloc_func)0;
 				stream.zfree = (free_func)0;
+#endif
 				stream.opaque = (voidpf)0;
 
 				err = inflateInit2(&stream, gzip ? 31 : MAX_WBITS);// windowBits <0 deflate;  8~15 zlib format; > 15 gzip format; abs() <=MAX_WBITS

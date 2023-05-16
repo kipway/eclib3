@@ -1,7 +1,8 @@
 /*!
 \file ec_file.h
 \author	kipway@outlook.com
-\update 2022.11.15
+\update 
+2023.5.13 use self memory allocator
 
 eclib file class
 
@@ -67,6 +68,7 @@ namespace ec
 			OF_APPEND_DATA = 0X80
 		};
 		enum SeekPosition { seek_set = 0, seek_cur = 1, seek_end = 2 };
+		_USE_EC_OBJ_ALLOCATOR
 	protected:
 #ifdef _WIN32
 		HANDLE		m_hFile;

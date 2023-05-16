@@ -2,8 +2,8 @@
 \file ec_netsrv_ws.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.8.4
-
+\update 2023.5.13
+2023.5.13 remove ec::memory
 net server http/ws session class
 
 net::base_ws
@@ -36,9 +36,8 @@ namespace ec
 			base_ws(const base_ws&) = delete;
 			base_ws& operator = (const base_ws&) = delete;
 
-			base_ws(uint32_t ucid, memory* pmem, ilog* plog) : _ucid(ucid), _nws(0), _wscompress(0),
-				_wsmsg(pmem),
-				_comp(0), _opcode(WS_OP_TXT), _pwsmem(pmem), _pwslog(plog)
+			base_ws(uint32_t ucid, ilog* plog) : _ucid(ucid), _nws(0), _wscompress(0),
+				_comp(0), _opcode(WS_OP_TXT), _pwslog(plog)
 			{
 			}
 		public:
@@ -48,7 +47,6 @@ namespace ec
 			bytes _wsmsg; // ws frame
 			int _comp;// compress flag
 			int _opcode;  // operate code
-			memory* _pwsmem;
 			ilog* _pwslog;
 		protected:
 			virtual int ws_iosend(const void* pdata, size_t size) = 0;
@@ -93,7 +91,7 @@ namespace ec
 					return ws_iosend(pdata, size);
 				else if (1 == _nws) {
 					bool bsend;
-					bytes vret(_pwsmem);
+					vstream vret;
 					vret.reserve(1024 + size - size % 512);
 					if (_wscompress == ws_x_webkit_deflate_frame) { //deflate-frame
 						bsend = ws_make_perfrm(pdata, size, optcode, &vret);
@@ -136,7 +134,7 @@ namespace ec
 						ws_send(http_sret400, strlen(http_sret400));
 						return pPkg->HasKeepAlive();
 					}
-					vector<char> vret(_pwsmem);
+					ec::string vret;
 
 					vret.reserve(1024 * 4);
 					const char* sc = "HTTP/1.1 101 Switching Protocols\x0d\x0a"\
@@ -275,7 +273,7 @@ namespace ec
 					_wsmsg.append(stxt + datapos, datalen);
 				else {
 					if (_wscompress == ws_x_webkit_deflate_frame) { //deflate_frame
-						vector<char> debuf(_pwsmem);
+						ec::string debuf;
 						debuf.reserve(EC_SIZE_WS_FRAME);
 						debuf.push_back('\x78');
 						debuf.push_back('\x9c');
@@ -285,7 +283,7 @@ namespace ec
 								return -1;
 						}
 						else {
-							bytes tmp(_pwsmem);
+							bytes tmp;
 							tmp.reserve(4 * debuf.size());
 							if (Z_OK != ws_decode_zlib(debuf.data(), debuf.size(), &tmp))
 								return -1;
@@ -402,7 +400,7 @@ namespace ec
 			\brief construct for update session
 			*/
 			session_ws(session&& ss) :
-				session(std::move(ss)), base_ws(session::_ucid, _pssmem, _psslog)
+				session(std::move(ss)), base_ws(session::_ucid, _psslog)
 			{
 				_protoc = EC_NET_SS_HTTP;
 			}

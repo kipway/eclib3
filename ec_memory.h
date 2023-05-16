@@ -2,23 +2,17 @@
 \file ec_memory.h
 \author	jiangyong
 \email  kipway@outlook.com
+\update 2023/5/13 autobuf remove ec::memory
+\update 2023.5.8 add ec::memory::maxblksize()
 \update 2023.3.1 update io_buffer::append
 \update 2022.10.10 update autobuf, mark mem_sets, block_allocator, cycle_fifo deprecated
 \update 2022.10.8 update parsebuffer
 \update 2022.7.24 add parsebuffer
 \update 2022.7.20 add io_buffer
 
-memory
-	fast memory allocator class for vector,hashmap etc.
 
 autobuf
 	buffer class auto free memory
-
-mem_sets
-	fast memory allocator
-
-cycle_fifo
-	for net io send
 
 io_buffer
 	for net io send
@@ -42,86 +36,6 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_alloctor.h"
 
 namespace ec {
-	class memory final
-	{
-	private:
-		allocator _allocator;
-	public:
-		memory(const memory&) = delete;
-		memory& operator = (const memory&) = delete;
-		memory(spinlock* plock = nullptr // plock not use, compatible for old version
-		) {
-		}
-
-		memory(size_t sblksize, size_t sblknum,
-			size_t mblksize = 0, size_t mblknum = 0,
-			size_t lblksize = 0, size_t lblknum = 0,
-			spinlock* plock = nullptr // plock not use, compatible for old version
-		)
-			: _allocator(sblksize, sblknum, mblksize, mblknum, lblksize, lblknum)
-		{
-		}
-
-		memory(size_t tblksize, size_t tblknum,
-			size_t sblksize, size_t sblknum,
-			size_t mblksize, size_t mblknum,
-			size_t lblksize, size_t lblknum,
-			size_t hblksize = 0, size_t hblknum = 0)
-		: _allocator(tblksize, tblknum, sblksize, sblknum, mblksize, mblknum, lblksize, lblknum)
-		{
-			if (hblksize && hblknum)
-				_allocator.add_alloctor(hblksize, hblknum);
-		}
-
-		inline void add_blk(size_t blksize, size_t blknum)
-		{
-			_allocator.add_alloctor(blksize, blknum);
-		}
-
-		inline void* malloc(size_t size, size_t& outsize)
-		{
-			return _allocator.malloc_(size, &outsize);
-		}
-
-		inline void* malloc(size_t size)
-		{
-			return _allocator.malloc_(size);
-		}
-
-		void* realloc(void* ptr, size_t size, size_t& outsize)
-		{
-			return _allocator.realloc_(ptr, size, &outsize);
-		}
-
-		void free(void* p)
-		{
-			_allocator.free_(p);
-		}
-
-		inline void* mem_malloc(size_t size)
-		{
-			return _allocator.malloc_(size);
-		}
-
-		void* mem_calloc(size_t count, size_t size)
-		{
-			void* p = _allocator.malloc_(count * size);
-			if (p)
-				memset(p, 0, count * size);
-			return p;
-		}
-
-		inline void* mem_realloc(void* ptr, size_t size)
-		{
-			return _allocator.realloc_(ptr, size);
-		}
-
-		inline void mem_free(void* p)
-		{
-			_allocator.free_(p);
-		}
-	};
-
 	template <typename _Tp = char>
 	class autobuf
 	{
@@ -135,15 +49,12 @@ namespace ec {
 		autobuf(const autobuf&) = delete;
 		autobuf& operator = (const autobuf&) = delete;
 
-		autobuf(memory* pmem = nullptr) :_pmem(pmem), _pbuf(nullptr), _size(0)
+		autobuf() : _pbuf(nullptr), _size(0)
 		{
 		}
-		autobuf(size_t size, memory* pmem = nullptr) :_pmem(pmem), _size(size)
+		autobuf(size_t size) : _size(size)
 		{
-			if (_pmem)
-				_pbuf = (value_type*)_pmem->malloc(size * sizeof(value_type), _size);
-			else
-				_pbuf = (value_type*)get_ec_allocator()->malloc_(size * sizeof(value_type), &_size);
+			_pbuf = (value_type*)get_ec_allocator()->malloc_(size * sizeof(value_type), &_size);
 			_size /= sizeof(value_type);
 			if (!_pbuf)
 				_size = 0;
@@ -155,7 +66,6 @@ namespace ec {
 		autobuf& operator = (autobuf&& v) // for move
 		{
 			this->~autobuf();
-			_pmem = v._pmem;
 			_pbuf = v._pbuf;
 			_size = v._size;
 
@@ -165,7 +75,6 @@ namespace ec {
 			return *this;
 		}
 	private:
-		memory* _pmem;
 		value_type*   _pbuf;
 		size_t  _size;
 	public:
@@ -182,10 +91,7 @@ namespace ec {
 		void clear()
 		{
 			if (_pbuf) {
-				if (_pmem)
-					_pmem->free(_pbuf);
-				else
-					get_ec_allocator()->free_(_pbuf);
+				get_ec_allocator()->free_(_pbuf);
 				_pbuf = nullptr;
 				_size = 0;
 			}
@@ -196,10 +102,7 @@ namespace ec {
 			clear();
 			if (!rsz)
 				return nullptr;
-			if (_pmem)
-				_pbuf = (value_type*)_pmem->malloc(rsz * sizeof(value_type), _size);
-			else
-				_pbuf = (value_type*)get_ec_allocator()->malloc_(rsz * sizeof(value_type), &_size);
+			_pbuf = (value_type*)get_ec_allocator()->malloc_(rsz * sizeof(value_type), &_size);
 			_size /= sizeof(value_type);
 			if (!_pbuf)
 				_size = 0;
@@ -207,229 +110,8 @@ namespace ec {
 		}
 	};
 
-	template <class _CLS, size_t _Num>
-	class mem_sets // deprecated
-	{
-	private:
-		blk_alloctor<spinlock> _mem;
-	public:
-		mem_sets() :_mem(sizeof(_CLS), _Num)
-		{
-		}
-		_CLS* newcls()
-		{
-			void* pcls = _mem.malloc_(sizeof(_CLS), nullptr);
-			if (!pcls)
-				return nullptr;
-			new(pcls)_CLS();
-			return (_CLS*)pcls;
-		}
-
-		bool freecls(_CLS* p)
-		{
-			if (!p)
-				return true;
-			p->~_CLS();
-			_mem.free_(p);
-			return true;
-		}
-	private:
-		size_t _blksize;
-	};
-
-	class block_allocator final //deprecated
-	{
-	private:
-		blk_alloctor<> _stack;
-	public:
-		block_allocator(size_t blksize, size_t blknum) : _stack(blksize, blknum)
-		{
-		}
-
-		~block_allocator() {
-		}
-
-		void _free(void* p)
-		{
-			if (!p)
-				return;
-			_stack.free_(p);
-		}
-
-		inline void* _malloc()
-		{
-			return _stack.malloc_(_stack.sizeblk(), nullptr);
-		}
-
-		inline size_t get_blksize()
-		{
-			return _stack.sizeblk();
-		}
-	};
-
-	class cycle_fifo // cycle FIFO bytes buffer, deprecated
-	{
-	public:
-		struct blk_ {
-			uint32_t pos;
-			uint32_t len;
-			uint8_t *buf;
-		};
-	private:
-		block_allocator* _pallocator;
-		blk_* _pbuf;
-		size_t _head, _tail, _numblks;
-
-		size_t blkappend(blk_* pblk, const uint8_t* p, size_t len)
-		{
-			if (!p || !len)
-				return 0;
-			size_t zadd = _pallocator->get_blksize() - pblk->len;
-			if (zadd) {
-				if (len < zadd)
-					zadd = len;
-				memcpy(pblk->buf + pblk->len, p, zadd);
-				pblk->len += (uint32_t)zadd;
-			}
-			return zadd;
-		}
-	public:
-		cycle_fifo(const cycle_fifo&) = delete;
-		cycle_fifo& operator = (const cycle_fifo&) = delete;
-		cycle_fifo(size_t size, block_allocator* pallocator) :_pallocator(pallocator), _head(0), _tail(0) {
-			if (!size) {
-				_numblks = 4;
-				_pbuf = nullptr;
-				return;
-			}
-
-			_numblks = size / pallocator->get_blksize();
-			if (_numblks < 4)
-				_numblks = 4;
-			_pbuf = (blk_*)::malloc(_numblks * sizeof(blk_));
-			if(_pbuf)
-				memset(_pbuf, 0, sizeof(_numblks * sizeof(blk_)));
-		}
-
-		cycle_fifo(cycle_fifo &&v)  //move construct
-		{
-			_pallocator = v._pallocator;
-			_pbuf = v._pbuf;
-			_head = v._head;
-			_tail = v._tail;
-			_numblks = v._numblks;
-
-			v._pallocator = nullptr;
-			v._pbuf = nullptr;
-			v._head = 0;
-			v._tail = 0;
-			v._numblks = 0;
-		}
-
-		~cycle_fifo() {
-			while (!empty())
-				pop();
-			if (_pbuf) {
-				::free(_pbuf);
-				_pbuf = nullptr;
-			}
-		}
-
-		cycle_fifo& operator = (cycle_fifo&& v) // for move
-		{
-			this->~cycle_fifo();
-			_pallocator = v._pallocator;
-			_pbuf = v._pbuf;
-			_head = v._head;
-			_tail = v._tail;
-			_numblks = v._numblks;
-
-			v._pallocator = nullptr;
-			v._pbuf = nullptr;
-			v._head = 0;
-			v._tail = 0;
-			v._numblks = 0;
-			return *this;
-		}
-
-		inline bool isnull()
-		{
-			return _pbuf == nullptr;
-		}
-
-		inline bool empty() {
-			return _head == _tail || nullptr == _pbuf ;
-		}
-
-		blk_* top() // get at head
-		{
-			if (_head == _tail)
-				return nullptr;
-			return _pbuf + _head;
-		}
-
-		bool append(const uint8_t* p, size_t len)
-		{
-			if (!p || !len)
-				return true;
-			size_t zadd = 0, zt;
-			if (_head != _tail) //not empty, try add to last block
-				zadd = blkappend(_pbuf + ((_tail + _numblks - 1) % _numblks), p, len);
-			while (zadd < len) {
-				if (((_tail + 1) % _numblks) == _head)
-					return false;// full
-				_pbuf[_tail].buf = (uint8_t*)_pallocator->_malloc();
-				if (!_pbuf[_tail].buf)
-					return false;
-				zt = _pallocator->get_blksize();
-				if (zt > len - zadd)
-					zt = len - zadd;
-				memcpy(_pbuf[_tail].buf, p + zadd, zt);
-				_pbuf[_tail].pos = 0;
-				_pbuf[_tail].len = (uint32_t)zt;
-				_tail = (_tail + 1) % _numblks;
-				zadd += zt;
-			}
-			return true;
-		}
-
-		void pop() // remove from head and free memory block
-		{
-			if (_head == _tail)
-				return;
-			if (_pbuf[_head].buf)
-				_pallocator->_free(_pbuf[_head].buf);
-			_pbuf[_head].buf = nullptr;
-			_pbuf[_head].len = 0;
-			_pbuf[_head].pos = 0;
-			_head = (_head + 1) % _numblks;
-		}
-
-		size_t size()
-		{
-			size_t h = _head, t = _tail;
-			uint32_t zlen = 0;;
-			while (h != t) {
-				zlen += _pbuf[h].len - _pbuf[h].pos;
-				h = (h + 1) % _numblks;
-			}
-			return zlen;
-		}
-
-		size_t blks()
-		{
-			return _head == _tail ? 0 : (_tail + _numblks - _head) % _numblks;
-		}
-
-		int waterlevel()
-		{
-			size_t numblk = blks() * 10000;
-			return static_cast<int>(numblk / (_numblks - 1));
-		}
-	};
-
 	template<class BLK_ALLOCTOR = blk_alloctor<>> //BLK_ALLOCTOR default not thread safe
-	class io_buffer // net IO bytes buffer,
+	class io_buffer // net IO bytes buffer,用于发送缓冲
 	{
 	private:
 		struct blk_ {
@@ -636,8 +318,7 @@ namespace ec {
 	class parsebuffer //协议解析优化缓冲,去掉解析时移动拷贝
 	{
 	public:
-		memory* _pmem;
-		parsebuffer(memory* pmem) : _pmem(pmem), _head(0), _tail(0), _bufsize(0), _pos(0), _pbuf(nullptr) {
+		parsebuffer() : _head(0), _tail(0), _bufsize(0), _pos(0), _pbuf(nullptr) {
 		}
 		~parsebuffer() {
 			free();
@@ -645,7 +326,6 @@ namespace ec {
 
 		parsebuffer(parsebuffer&& v) noexcept //move construct
 		{
-			_pmem = v._pmem;
 			_head = v._head;
 			_tail = v._tail;
 			_bufsize = v._bufsize;
@@ -663,7 +343,6 @@ namespace ec {
 		{
 			this->~parsebuffer();
 
-			_pmem = v._pmem;
 			_head = v._head;
 			_tail = v._tail;
 			_bufsize = v._bufsize;
@@ -679,9 +358,6 @@ namespace ec {
 			return *this;
 		}
 
-		inline memory* get_allocator() {
-			return _pmem;
-		}
 	private:
 		size_t _head;// next read position >=0
 		size_t _tail;// next write position <= _bufsize
@@ -690,13 +366,9 @@ namespace ec {
 		uint8_t* _pbuf;
 	private:
 		void* malloc_(size_t size, size_t& outsize) {
-			if (_pmem)
-				return _pmem->malloc(size, outsize);
 			return ::get_ec_allocator()->malloc_(size, &outsize);
 		}
 		void free_(void* p) {
-			if (_pmem)
-				return _pmem->free(p);
 			return ::get_ec_allocator()->free_(p);
 		}
 	public:

@@ -2,7 +2,7 @@
 \file ec_array.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.2.18
+\update 2022.4.20 change to noexcept
 
 array
 	a extended array class for trivially copyable type
@@ -14,7 +14,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 
 Description
-ec::array is not same as std::array. it's like a vector with fixed-size capacity.And expanded some functions, can be used as string, stack, stream
+ec::array is not same as std::array. it's like a stack memory vector with fixed-size capacity.And expanded some functions, can be used as string, stack, stream
 
 iterator: a random access iterator to value_type
 
@@ -129,11 +129,11 @@ namespace ec {
 			return _size >= _Num;
 		}
 
-		void reserve(size_type n)
+		void reserve(size_type n) noexcept
 		{
 		}
 
-		void resize(size_type n)
+		void resize(size_type n) noexcept
 		{
 			if (n <= _Num)
 				_size = n;
@@ -154,45 +154,45 @@ namespace ec {
 			return _data[pos];
 		}
 
-		reference at(size_type pos)
+		reference at(size_type pos) noexcept
 		{
 			if (pos >= _Num)
-				throw std::out_of_range("out of range");
+				return _data[0]; //throw std::out_of_range("out of range");
 			return _data[pos];
 		}
 
 		const_reference at(size_type pos) const noexcept
 		{
 			if (pos >= _Num)
-				throw std::out_of_range("out of range");
+				return _data[0]; //throw std::out_of_range("out of range");
 			return _data[pos];
 		}
 
-		inline reference front()
+		inline reference front() noexcept
 		{
-			if (!_size)
-				throw std::out_of_range("out of range");
+			//if (!_size)
+			//	throw std::out_of_range("out of range");
 			return _data[0];
 		}
 
-		inline const_reference front() const
+		inline const_reference front() const noexcept
 		{
-			if (!_size)
-				throw std::out_of_range("out of range");
+			//if (!_size)
+			//	throw std::out_of_range("out of range");
 			return _data[0];
 		}
 
-		inline reference back()
+		inline reference back() noexcept
 		{
 			if (!_size)
-				throw std::out_of_range("out of range");
+				return _data[0]; //throw std::out_of_range("out of range");
 			return _data[_size - 1];
 		}
 
-		const_reference back() const
+		const_reference back() const noexcept
 		{
 			if (!_size)
-				throw std::out_of_range("out of range");
+				return _data[0]; //throw std::out_of_range("out of range");
 			return _data[_size - 1];
 		}
 
@@ -231,10 +231,10 @@ namespace ec {
 			return true;
 		}
 
-		array& append(const value_type *pbuf, size_type usize)
+		array& append(const value_type *pbuf, size_type usize) noexcept
 		{ //like std::string::append
 			if (_size + usize > _Num)
-				throw std::out_of_range("out of range");
+				return *this; //throw std::out_of_range("out of range");
 			if (usize && pbuf) {
 				memcpy(&_data[_size], pbuf, usize * sizeof(value_type));
 				_size += usize;
@@ -242,11 +242,10 @@ namespace ec {
 			return *this;
 		};
 
-		void push_back(const value_type& val)
+		void push_back(const value_type& val) noexcept
 		{ //like std::vector::push_back
-			if (_size >= _Num)
-				throw std::out_of_range("out of range");
-			_data[_size++] = val;
+			if (_size < _Num)
+				_data[_size++] = val;
 		}
 
 		void pop_back() noexcept
@@ -255,7 +254,7 @@ namespace ec {
 				_size--;
 		}
 
-		inline void push(const value_type& val)
+		inline void push(const value_type& val) noexcept
 		{ // like std::stack::push
 			push_back(val);
 		}
@@ -288,13 +287,13 @@ namespace ec {
 			_size -= size;
 		}
 
-		void setsize(size_t size)
+		void setsize(size_t size) noexcept
 		{
 			resize(size);
 		}
 
-		bool insert(size_type pos, const value_type *pval, size_t insize = 1) noexcept // insert before
-		{
+		bool insert(size_type pos, const value_type *pval, size_t insize = 1) noexcept
+		{ // insert before
 			if (_size + insize > _Num || !insize || !pval)
 				return false;
 			if (pos >= _size)
@@ -317,19 +316,19 @@ namespace ec {
 
 		template<typename T
 			, class = typename std::enable_if<sizeof(_Tp) == 1 && std::is_same<T, char>::value>::type>
-			array &append(const T* s)
+			array &append(const T* s) noexcept
 		{
 			return append((const value_type*)s, strlen(s));
 		}
 
 		template<typename T
 			, class = typename std::enable_if<sizeof(_Tp) == 1 && (std::is_arithmetic<T>::value || std::is_void<T>::value)>::type >
-			array &append(const T * s, size_type size)
+			array &append(const T * s, size_type size) noexcept
 		{
 			return append((const value_type*)s, size);
 		}
 
-		array &assign(const value_type* p, size_t size)
+		array &assign(const value_type* p, size_t size) noexcept
 		{
 			clear();
 			return append(p, size);
@@ -337,7 +336,7 @@ namespace ec {
 
 		template<typename T
 			, class = typename std::enable_if<sizeof(_Tp) == 1 && std::is_same<T, char>::value>::type>
-			array &assign(const T* s)
+			array &assign(const T* s) noexcept
 		{
 			clear();
 			if (!s)
@@ -347,7 +346,7 @@ namespace ec {
 
 		template<typename T
 			, class = typename std::enable_if<sizeof(_Tp) == 1 && std::is_same<T, char>::value>::type>
-			array& operator= (const T* s)
+			array& operator= (const T* s) noexcept
 		{
 			clear();
 			if (!s)
@@ -357,27 +356,27 @@ namespace ec {
 
 		template<typename T
 			, class = typename std::enable_if<sizeof(_Tp) == 1 && std::is_same<T, char>::value>::type>
-			array& operator+= (const T* s)
+			array& operator+= (const T* s) noexcept
 		{
 			if (!s)
 				return *this;
 			return append((const value_type*)s, strlen(s));
 		}
 
-		array& operator+= (value_type c)
+		array& operator+= (value_type c) noexcept
 		{
 			push_back(c);
 			return *this;
 		}
-		inline array& operator+= (const array& v)
+		inline array& operator+= (const array& v) noexcept
 		{
 			return append(v.data(), v.size());
 		}
 		
 #ifdef _WIN32
-		bool printf(const char * format, ...)
+		bool printf(const char * format, ...) noexcept
 #else
-		bool printf(const char * format, ...) __attribute__((format(printf, 2, 3)))
+		bool printf(const char * format, ...) noexcept __attribute__((format(printf, 2, 3)))
 #endif
 		{
 			va_list arg_ptr;
@@ -403,13 +402,13 @@ namespace ec {
 			return ua.u8 == 0x01;
 		}
 
-		array & setpos(size_type pos)
+		array & setpos(size_type pos) noexcept
 		{
 			_pos = pos > _size ? _size : pos;
 			return *this;
 		};
 
-		array &postoend()
+		array &postoend() noexcept
 		{
 			_pos = _size;
 			return *this;
@@ -422,10 +421,10 @@ namespace ec {
 
 		template < typename T
 			, class = typename std::enable_if<sizeof(_Tp) == 1 && (std::is_arithmetic<T>::value || std::is_void<T>::value)>::type>
-			array & read(T* pbuf, size_type size)
+			array & read(T* pbuf, size_type size) noexcept
 		{
 			if (_pos + size > _size)
-				throw std::out_of_range("out of range");
+				return *this; //throw std::out_of_range("out of range");
 			memcpy(pbuf, (const uint8_t*)_data + _pos, size);
 			_pos += size;
 			return *this;
@@ -433,10 +432,10 @@ namespace ec {
 
 		template < typename T
 			, class = typename std::enable_if<sizeof(_Tp) == 1 && (std::is_arithmetic<T>::value || std::is_void<T>::value)>::type>
-			array & write(const T* pbuf, size_type size)
+			array & write(const T* pbuf, size_type size) noexcept
 		{
 			if (_pos + size > _Num)
-				throw std::out_of_range("out of range");
+				return *this; // throw std::out_of_range("out of range");
 			memcpy((uint8_t*)_data + _pos, pbuf, size);
 			_pos += size;
 			if (_size < _pos)
@@ -446,10 +445,10 @@ namespace ec {
 
 		template < typename T
 			, class = typename std::enable_if<sizeof(_Tp) == 1 && std::is_arithmetic<T>::value>::type>
-			array & operator >> (T& v)
+			array & operator >> (T& v) noexcept
 		{ // read as little_endian
 			if (_pos + sizeof(T) > _size)
-				throw std::out_of_range("out of range");
+				return *this;// throw std::out_of_range("out of range");
 			if (!is_be())
 				memcpy(&v, (const uint8_t*)_data + _pos, sizeof(T));
 			else {
@@ -466,10 +465,10 @@ namespace ec {
 
 		template < typename T
 			, class = typename std::enable_if<sizeof(_Tp) == 1 && std::is_arithmetic<T>::value>::type>
-			array & operator > (T & v)
+			array & operator > (T & v) noexcept
 		{  // read as big_endian
 			if (_pos + sizeof(T) > _size)
-				throw std::out_of_range("out of range");
+				return *this; //throw std::out_of_range("out of range");
 			if (is_be())
 				memcpy(&v, (const uint8_t*)_data + _pos, sizeof(T));
 			else {
@@ -486,10 +485,10 @@ namespace ec {
 
 		template < typename T
 			, class = typename std::enable_if<sizeof(_Tp) == 1 && std::is_arithmetic<T>::value>::type>
-			array & operator << (T v)
+			array & operator << (T v) noexcept
 		{  // write as little_endian
 			if (_pos + sizeof(T) > _Num)
-				throw std::out_of_range("out of range");
+				return *this; //throw std::out_of_range("out of range");
 
 			if (!is_be())
 				memcpy((uint8_t*)_data + _pos, &v, sizeof(T));
@@ -509,10 +508,10 @@ namespace ec {
 
 		template < typename T
 			, class = typename std::enable_if<sizeof(_Tp) == 1 && std::is_arithmetic<T>::value>::type>
-			array & operator < (T v)
+			array & operator < (T v) noexcept
 		{   // write as big_endian
 			if (_pos + sizeof(T) > _Num)
-				throw std::out_of_range("out of range");
+				return *this; //throw std::out_of_range("out of range");
 			if (is_be())
 				memcpy((uint8_t*)_data + _pos, &v, sizeof(T));
 			else {

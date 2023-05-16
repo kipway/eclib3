@@ -3,7 +3,7 @@
 
 \author jiangyong
 \email  kipway@outlook.com
-\update 2022.10.9
+\update 2023.5.15
 
 stack
 	 LIFO stack
@@ -43,21 +43,7 @@ namespace ec
 			template <typename... Args>
 			t_node(Args&&... args) : pNext(nullptr), value(std::forward<Args>(args)...) {
 			}
-			static void* operator new(size_t size)
-			{
-				return get_ec_allocator()->malloc_(size);
-			}
-			static void operator delete(void* p)
-			{
-				get_ec_allocator()->free_(p);
-			}
-			static void* operator new(size_t size, void* ptr)
-			{
-				return ptr;
-			}
-			static void operator delete(void* ptr, void* voidptr2) noexcept
-			{
-			}
+			_USE_EC_OBJ_ALLOCATOR
 		};
 	protected:
 		t_node* _phead;

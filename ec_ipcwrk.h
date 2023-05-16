@@ -19,6 +19,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #pragma once
 
 #include <stdint.h>
+#include "ec_memory.h"
 #include "ec_netio.h"
 
 #ifdef _WIN32

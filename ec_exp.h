@@ -5,9 +5,9 @@ eclib for sample Expression calculation class, new version. support functions an
 
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.1.11
+\update 2023.5.15
 
-eclib Copyright (c) 2017-2021, kipway
+eclib Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway/eclib
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,10 +16,10 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 
 */
 #pragma once
-#include <stack>
-#include <string>
 #include <functional>
-#include "ec_string.h"
+#include "ec_vector.hpp"
+#include "ec_stack.h"
+#include "ec_string.hpp"
 namespace ec
 {
 	class exp
@@ -134,6 +134,7 @@ namespace ec
 					printf("\n");
 			}
 		};
+		using ExtFunArgs = ec::vector<val_>;
 		class inode_
 		{
 		public:
@@ -141,6 +142,7 @@ namespace ec
 			}
 			virtual ~inode_() {
 			}
+			_USE_EC_OBJ_ALLOCATOR
 		public:
 			virtual int type() = 0;
 			virtual bool getval(val_ &v, std::function<int(const char* varname, val_&var)>getvar) {
@@ -153,6 +155,8 @@ namespace ec
 				return -1;
 			}
 		};
+		using nodePtrVector = ec::vector<inode_*>;
+		using funExpArgs = ec::vector<nodePtrVector>;
 		class node_left_ : public inode_ // left (
 		{
 		public:
@@ -221,7 +225,7 @@ namespace ec
 				_args.clear();
 			}
 			STR_ _name;
-			std::vector<std::vector<inode_*>> _args;
+			funExpArgs _args;
 		public:
 			virtual int type() {
 				return node_fun;
@@ -369,7 +373,7 @@ namespace ec
 			return nr;
 		}
 	private:
-		void parse_outvar(STR_ &skey, std::vector<inode_*> &vout, int &prenode)  const
+		void parse_outvar(STR_& skey, nodePtrVector& vout, int& prenode)  const
 		{
 			if (isnumber(skey.c_str())) {
 				if (strchr(skey.c_str(), '.'))
@@ -388,7 +392,7 @@ namespace ec
 			}
 			skey.clear();
 		}
-		void clearstack(std::stack<inode_*> &stk)  const
+		void clearstack(ec::stack<inode_*> &stk)  const
 		{
 			while (!stk.empty()) {
 				delete stk.top();
@@ -417,7 +421,7 @@ namespace ec
 			}
 			return false;
 		}
-		bool parsefunexp(const char* sexp, std::vector<std::vector<inode_*>> &args)  const
+		bool parsefunexp(const char* sexp, funExpArgs& args)  const
 		{
 			const char* pc = sexp;
 			const char* ps = sexp;
@@ -435,7 +439,7 @@ namespace ec
 					break;
 				case ',':
 					if (!(ny % 2) && !nk) {
-						std::vector<inode_*> arg;
+						nodePtrVector arg;
 						if (parse(ps, pc - ps, arg))
 							return false;
 						if (!arg.empty())
@@ -447,7 +451,7 @@ namespace ec
 				++pc;
 			}
 			if (pc > ps) {
-				std::vector<inode_*> arg;
+				nodePtrVector arg;
 				if (parse(ps, pc - ps, arg))
 					return false;
 				if (!arg.empty())
@@ -494,14 +498,14 @@ namespace ec
 			return false;
 		}
 	public:
-		int parse(const char* s, size_t size, std::vector<inode_*> &vout) const
+		int parse(const char* s, size_t size, nodePtrVector& vout) const
 		{
 			const char *ps = s, *pend = s + size;
 			int np1, np2;
 			int prenode = node_left;
 			STR_ skey = "", stmp;
 			char c;
-			std::stack<inode_*> optstk;
+			ec::stack<inode_*> optstk;
 			while (ps < pend) {
 				c = *ps;
 				if (c == ' ' || c == '\n' || c == '\r' || c == '\t') {
@@ -660,13 +664,13 @@ namespace ec
 		}
 
 		using fun_getvar = std::function<int(const char* varname, val_&var)>;
-		int eval(std::vector<inode_*> &nodes
+		int eval(nodePtrVector& nodes
 			, std::function<int(const char* varname, val_&var)>getvar
 			, std::function<int(node_fun_* pfun, fun_getvar getvar, val_&var)>dofunction
 			, val_ &vret
 		) const
 		{
-			std::stack<val_> stk;
+			ec::stack<val_> stk;
 			int  nodetype;
 			val_ v;
 			bool bret;
@@ -763,7 +767,7 @@ namespace ec
 		}
 
 	private:
-		bool pop1(std::stack<val_> &stk, val_& v) const
+		bool pop1(ec::stack<val_> &stk, val_& v) const
 		{
 			if (stk.empty())
 				return false;
@@ -771,7 +775,7 @@ namespace ec
 			stk.pop();
 			return true;
 		}
-		bool pop2(std::stack<val_> &stk, val_& v1, val_& v2) const
+		bool pop2(ec::stack<val_> &stk, val_& v1, val_& v2) const
 		{
 			if (stk.size() < 2)
 				return false;
@@ -781,7 +785,7 @@ namespace ec
 			stk.pop();
 			return true;
 		}
-		bool opt_logor(std::stack<val_> &stk) const // ||
+		bool opt_logor(ec::stack<val_> &stk) const // ||
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -792,7 +796,7 @@ namespace ec
 				stk.push(val_(v1.getdbl() || v2.getdbl() ? 1 : 0));
 			return true;
 		}
-		bool opt_logand(std::stack<val_> &stk) const // &&
+		bool opt_logand(ec::stack<val_> &stk) const // &&
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -803,7 +807,7 @@ namespace ec
 				stk.push(val_(v1.getdbl() && v2.getdbl() ? 1 : 0));
 			return true;
 		}
-		bool opt_bitor(std::stack<val_> &stk) const // |
+		bool opt_bitor(ec::stack<val_> &stk) const // |
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -811,7 +815,7 @@ namespace ec
 			stk.push(val_(v1.getint64() | v2.getint64()));
 			return true;
 		}
-		bool opt_bitxor(std::stack<val_> &stk) const // ^
+		bool opt_bitxor(ec::stack<val_> &stk) const // ^
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -819,7 +823,7 @@ namespace ec
 			stk.push(val_(v1.getint64() ^ v2.getint64()));
 			return true;
 		}
-		bool opt_bitand(std::stack<val_> &stk)  const // &
+		bool opt_bitand(ec::stack<val_> &stk)  const // &
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -827,7 +831,7 @@ namespace ec
 			stk.push(val_(v1.getint64() & v2.getint64()));
 			return true;
 		}
-		bool opt_eq(std::stack<val_> &stk) const // ==
+		bool opt_eq(ec::stack<val_> &stk) const // ==
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -838,7 +842,7 @@ namespace ec
 				stk.push(val_(v1.getdbl() == v2.getdbl() ? 1 : 0));
 			return true;
 		}
-		bool opt_noteq(std::stack<val_> &stk) const // !=
+		bool opt_noteq(ec::stack<val_> &stk) const // !=
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -849,7 +853,7 @@ namespace ec
 				stk.push(val_(v1.getdbl() != v2.getdbl() ? 1 : 0));
 			return true;
 		}
-		bool opt_less(std::stack<val_> &stk) const // <
+		bool opt_less(ec::stack<val_> &stk) const // <
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -860,7 +864,7 @@ namespace ec
 				stk.push(val_(v1.getdbl() < v2.getdbl() ? 1 : 0));
 			return true;
 		}
-		bool opt_lesseq(std::stack<val_> &stk) const // <=
+		bool opt_lesseq(ec::stack<val_> &stk) const // <=
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -871,7 +875,7 @@ namespace ec
 				stk.push(val_(v1.getdbl() <= v2.getdbl() ? 1 : 0));
 			return true;
 		}
-		bool opt_great(std::stack<val_> &stk)  const// >
+		bool opt_great(ec::stack<val_> &stk)  const// >
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -882,7 +886,7 @@ namespace ec
 				stk.push(val_(v1.getdbl() > v2.getdbl() ? 1 : 0));
 			return true;
 		}
-		bool opt_greateq(std::stack<val_> &stk) const // >=
+		bool opt_greateq(ec::stack<val_> &stk) const // >=
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -893,7 +897,7 @@ namespace ec
 				stk.push(val_(v1.getdbl() >= v2.getdbl() ? 1 : 0));
 			return true;
 		}
-		bool opt_lbit(std::stack<val_> &stk) const //  <<
+		bool opt_lbit(ec::stack<val_> &stk) const //  <<
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -901,7 +905,7 @@ namespace ec
 			stk.push(val_(v1.getint64() << v2.getint64()));
 			return true;
 		}
-		bool opt_rbit(std::stack<val_> &stk) const //  >>
+		bool opt_rbit(ec::stack<val_> &stk) const //  >>
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -909,7 +913,7 @@ namespace ec
 			stk.push(val_(v1.getint64() >> v2.getint64()));
 			return true;
 		}
-		bool opt_add(std::stack<val_> &stk)  const // +
+		bool opt_add(ec::stack<val_> &stk)  const // +
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -920,7 +924,7 @@ namespace ec
 				stk.push(val_(v1.getdbl() + v2.getdbl()));
 			return true;
 		}
-		bool opt_dec(std::stack<val_> &stk)  const // -
+		bool opt_dec(ec::stack<val_> &stk)  const // -
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -931,7 +935,7 @@ namespace ec
 				stk.push(val_(v1.getdbl() - v2.getdbl()));
 			return true;
 		}
-		bool opt_mult(std::stack<val_> &stk)  const // *
+		bool opt_mult(ec::stack<val_> &stk)  const // *
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -942,7 +946,7 @@ namespace ec
 				stk.push(val_(v1.getdbl() * v2.getdbl()));
 			return true;
 		}
-		bool opt_div(std::stack<val_> &stk) const  // /
+		bool opt_div(ec::stack<val_> &stk) const  // /
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -959,7 +963,7 @@ namespace ec
 			}
 			return true;
 		}
-		bool opt_mod(std::stack<val_> &stk)  const // %
+		bool opt_mod(ec::stack<val_> &stk)  const // %
 		{
 			val_ v1, v2;
 			if (!pop2(stk, v1, v2) || dt_string == v1.dtype || dt_string == v2.dtype)
@@ -969,7 +973,7 @@ namespace ec
 			stk.push(val_(v1.getint64() % v2.getint64()));
 			return true;
 		}
-		bool opt_unval(std::stack<val_> &stk)  const // - (负)
+		bool opt_unval(ec::stack<val_> &stk)  const // - (负)
 		{
 			val_ v1;
 			if (!pop1(stk, v1) || dt_string == v1.dtype)
@@ -980,7 +984,7 @@ namespace ec
 				stk.push(val_(-1 * v1.getint64()));
 			return true;
 		}
-		bool opt_bitnot(std::stack<val_> &stk)  const // ~
+		bool opt_bitnot(ec::stack<val_> &stk)  const // ~
 		{
 			val_ v1;
 			if (!pop1(stk, v1) || dt_string == v1.dtype)
@@ -988,7 +992,7 @@ namespace ec
 			stk.push(val_(~v1.getint64()));
 			return true;
 		}
-		bool opt_lognot(std::stack<val_> &stk) const  // !
+		bool opt_lognot(ec::stack<val_> &stk) const  // !
 		{
 			val_ v1;
 			if (!pop1(stk, v1) || dt_string == v1.dtype)
@@ -1014,7 +1018,7 @@ namespace ec
 			return e.parse(str, size, _vo);
 		}
 		using fun_getvar = std::function<int(const char* varname, exp::val_& var)>;
-		using fun_dofun = std::function<int(const char*sname, std::vector<exp::val_> &args, exp::val_& valout)>;
+		using fun_dofun = std::function<int(const char*sname, exp::ExtFunArgs& args, exp::val_& valout)>;
 		int eval(fun_getvar getvar, fun_dofun dofun, exp::val_ &vout) {
 			exp e;
 			return e.eval(_vo, getvar, [&](exp::node_fun_* pfun, fun_getvar getvar, exp::val_& valout) {
@@ -1034,7 +1038,7 @@ namespace ec
 			return *this;
 		}
 	private:
-		std::vector<exp::inode_*> _vo;
+		exp::nodePtrVector _vo;
 		void clear() {
 			for (auto &i : _vo)
 				delete i;
@@ -1042,7 +1046,7 @@ namespace ec
 		}
 		int dofunexp(exp::node_fun_* pfun, fun_getvar getvar, fun_dofun dofunction, exp::val_ &varout)
 		{
-			std::vector<exp::val_> expvals;
+			exp::ExtFunArgs expvals;
 			for (auto i = 0u; i < pfun->_args.size(); i++) {
 				ec::exp::val_ vret;
 				ec::exp exp;
@@ -1069,7 +1073,7 @@ int getvar(const char* svar, ec::exp::val_ &var)
 	return -1;
 }
 
-int dofun(const char*sname, std::vector<ec::exp::val_> &args, ec::exp::val_& valout)
+int dofun(const char*sname, ec::exp::ExtFunArgs &args, ec::exp::val_& valout)
 {
 	if (ec::strieq("add", sname)) {
 		if (args.size() != 2)

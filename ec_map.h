@@ -2,7 +2,8 @@
 \file ec_hashmap.h
 \author jiangyong
 \email  kipway@outlook.com
-\update 2022.10.8
+\update 2023.5.13
+2023.5.13 use _USE_EC_OBJ_ALLOCATOR
 
 hashmap
 	A hash map class, incompatible with std::unordered_map.
@@ -70,22 +71,7 @@ namespace ec
 			template <typename... Args>
 			t_node(Args&&... args) : pNext(nullptr), value(std::forward<Args>(args)...) {
 			}
-
-			static void* operator new(size_t size)
-			{
-				return get_ec_allocator()->malloc_(size);
-			}
-			static void* operator new(size_t size, void* ptr)
-			{
-				return ptr;
-			}
-			static void operator delete(void* p)
-			{
-				get_ec_allocator()->free_(p);
-			}
-			static void operator delete(void* ptr, void* voidptr2) noexcept
-			{
-			}
+			_USE_EC_OBJ_ALLOCATOR
 		};
 
 		class iterator
@@ -155,7 +141,7 @@ namespace ec
 			, _uhashsize(uhashsize)
 			, _usize(0)
 		{
-			_ppv = (t_node**)get_ec_allocator()->malloc_(_uhashsize * sizeof(t_node*));
+			_ppv = (t_node**)ec_malloc(_uhashsize * sizeof(t_node*));
 			if (nullptr == _ppv)
 				return;
 			memset(_ppv, 0, sizeof(t_node*) * _uhashsize);
@@ -165,7 +151,7 @@ namespace ec
 		{
 			clear();
 			if (_ppv) {
-				get_ec_allocator()->free_(_ppv);
+				ec_free(_ppv);
 				_ppv = nullptr;
 			}
 		}

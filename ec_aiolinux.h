@@ -30,7 +30,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_map.h"
 #include "ec_netio.h"
 #include "ec_jsonx.h"
-
+#include "ec_vector.hpp"
 #ifndef SIZE_MAX_FD
 #define SIZE_MAX_FD  16384 //最大fd连接数
 #endif
@@ -110,7 +110,7 @@ public:
 	{
 	}
 	~netio_linux() {
-		std::vector<int> vepolls;
+		ec::vector<int> vepolls;
 		for (auto& i : _mapfd) {
 			if (fd_epoll == i.fdtype)
 				vepolls.push_back(i.sysfd);
@@ -320,7 +320,7 @@ public:
 		return shutdown(p->sysfd, SHUT_RDWR);
 	}
 
-	void getall(std::vector<int>& fds)
+	void getall(ec::vector<int>& fds)
 	{
 		for (auto& i : _mapfd)
 			fds.push_back(i.kfd);

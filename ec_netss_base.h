@@ -2,6 +2,7 @@
 \file ec_netsrv_base.h
 \author	jiangyong
 \email  kipway@outlook.com
+\update 2023.5.13 remove ec::memory
 \update 2023.2.3
 
 // 2023.2.3 upgrade session _ip size for ipv6
@@ -49,7 +50,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #	include <poll.h>
 #	include <fcntl.h>
 #endif
-
+#include "ec_memory.h"
 #include "ec_crc.h"
 #include "ec_string.h"
 #include "ec_log.h"
@@ -187,6 +188,7 @@ namespace ec
 		class ssext_data // application session extension data
 		{
 		public:
+			_USE_EC_OBJ_ALLOCATOR
 			ssext_data() {
 			}
 			virtual ~ssext_data() {
@@ -199,13 +201,14 @@ namespace ec
 		class session // base connect session class
 		{
 		public:
+			_USE_EC_OBJ_ALLOCATOR
 			session& operator = (const session& v) = delete;
 			session(const session& v) = delete;
-			session(uint32_t listenid, uint32_t ucid, SOCKET  fd, uint32_t protoc, uint32_t status, memory* pmem, ilog* plog, blk_alloctor<>* pblkallocator) :
+			session(uint32_t listenid, uint32_t ucid, SOCKET  fd, uint32_t protoc, uint32_t status, ilog* plog, blk_alloctor<>* pblkallocator) :
 				_listenid(listenid), _protoc(protoc), _status(status), _fd(fd), _ucid(ucid)
 				, _timesndblcok(0), _time_err(0)
-				, _pause_r(0), _peerport(0), _rbuf(pmem), _pextdata(nullptr)
-				, _pssmem(pmem), _psslog(plog)
+				, _pause_r(0), _peerport(0), _pextdata(nullptr)
+				, _psslog(plog)
 				,_sndbuf(NET_SENDBUF_MAXSIZE, pblkallocator)
 			{
 				_ip[0] = 0;
@@ -239,7 +242,6 @@ namespace ec
 				_peerport = v._peerport;
 				_timeconnect = v._timeconnect;
 				_pextdata = v._pextdata;
-				_pssmem = v._pssmem;
 				_psslog = v._psslog;
 
 				memcpy(_ip, v._ip, sizeof(_ip));
@@ -315,7 +317,6 @@ namespace ec
 		private:
 			ssext_data* _pextdata; //application session extension data
 		protected:
-			memory* _pssmem; // Memory allocator
 			ilog*   _psslog;
 			friend class session_tls;
 			friend class session_ws;
@@ -432,8 +433,8 @@ namespace ec
 		class listen_session : public session
 		{
 		public:
-			listen_session(uint32_t ucid, SOCKET  fd, memory* pmem, ilog* plog, blk_alloctor<>* pblkallocator) :
-				session(ucid, ucid, fd, EC_NET_SS_LISTEN, EC_NET_ST_WORK, pmem, plog, pblkallocator)
+			listen_session(uint32_t ucid, SOCKET  fd, ilog* plog, blk_alloctor<>* pblkallocator) :
+				session(ucid, ucid, fd, EC_NET_SS_LISTEN, EC_NET_ST_WORK, plog, pblkallocator)
 			{
 			}
 
@@ -451,8 +452,8 @@ namespace ec
 		class session_udpsrv : public session
 		{
 		public:
-			session_udpsrv(uint32_t ucid, SOCKET  fd, memory* pmem, ilog* plog, blk_alloctor<>* pblkallocator) :
-				session(ucid, ucid, fd, EC_NET_SS_LISTEN, EC_NET_ST_PRE, pmem, plog, pblkallocator)
+			session_udpsrv(uint32_t ucid, SOCKET  fd, ilog* plog, blk_alloctor<>* pblkallocator) :
+				session(ucid, ucid, fd, EC_NET_SS_LISTEN, EC_NET_ST_PRE, plog, pblkallocator)
 			{
 			}
 		public:

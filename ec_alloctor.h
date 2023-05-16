@@ -2,12 +2,12 @@
 \file ec_alloctor.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.10.20
+\update 2023.5.13
 
 memory
 	eclib memory allocator for ec::string, ec::hashmap, and other small objects etc.
 
-eclib 3.0 Copyright (c) 2017-2022, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,6 +27,16 @@ namespace ec {
 	{
 		glibc_noarena() {
 			mallopt(M_ARENA_MAX, 1);
+#if defined(_MEM_TINY) // < 256M
+			mallopt(M_MMAP_THRESHOLD, 160 * 1024);
+			mallopt(M_TRIM_THRESHOLD, 160 * 1024);
+#elif defined(_MEM_SML) // < 1G
+			mallopt(M_MMAP_THRESHOLD, 256 * 1024);
+			mallopt(M_TRIM_THRESHOLD, 256 * 1024);
+#else
+			mallopt(M_MMAP_THRESHOLD, 1024 * 1024);
+			mallopt(M_TRIM_THRESHOLD, 1024 * 1024);
+#endif
 		}
 	};
 }
@@ -44,42 +54,52 @@ namespace ec {
 #define EC_ALLOCTOR_ALIGN 8u
 #endif
 
-#ifndef EC_ALLOCTOR_HEAP_SIZE
+#ifndef EC_ALLOCTOR_SHEAP_SIZE  // small heap size
 #if defined(_MEM_TINY) // < 256M
-#define EC_ALLOCTOR_HEAP_SIZE (256 * 1024)  // 256K heap size
+#define EC_ALLOCTOR_SHEAP_SIZE (128 * 1024) // 128K heap size
 #elif defined(_MEM_SML) // < 1G
-#define EC_ALLOCTOR_HEAP_SIZE (1024 * 1024) // 1M heap size
+#define EC_ALLOCTOR_SHEAP_SIZE (256 * 1024) // 256K heap size
 #else
-#define EC_ALLOCTOR_HEAP_SIZE (2 * 1024 * 1024) // 2M heap size
+#define EC_ALLOCTOR_SHEAP_SIZE (1024 * 1024) // 1M heap size
 #endif
 #endif
 
-#ifndef EC_ALLOCTOR_HEAP_NUM
+#ifndef EC_ALLOCTOR_MHEAP_SIZE // middle heap size
 #if defined(_MEM_TINY) // < 256M
-#define EC_ALLOCTOR_HEAP_NUM  9  //32-8K
+#define EC_ALLOCTOR_MHEAP_SIZE (256 * 1024) // 256K heap size
 #elif defined(_MEM_SML) // < 1G
-#define EC_ALLOCTOR_HEAP_NUM  10 //64-32K
+#define EC_ALLOCTOR_MHEAP_SIZE (512 * 1024) // 512K heap size
 #else
-#define EC_ALLOCTOR_HEAP_NUM  12 //64-128k
+#define EC_ALLOCTOR_MHEAP_SIZE (2 * 1024 * 1024) // 1M heap size
+#endif
+#endif
+
+#ifndef EC_ALLOCTOR_HHEAP_SIZE // huge heap size
+#if defined(_MEM_TINY) // < 256M
+#define EC_ALLOCTOR_HHEAP_SIZE (512 * 1024) // 512K heap size
+#elif defined(_MEM_SML) // < 1G
+#define EC_ALLOCTOR_HHEAP_SIZE (1 * 1024 * 1024) // 1M heap size
+#else
+#define EC_ALLOCTOR_HHEAP_SIZE (4 * 1024 * 1024) // 4M heap size
 #endif
 #endif
 
 #ifndef EC_ALLOCTOR_GC_MINHEAPS // start garbage collection min number of heaps
 #if defined(_MEM_TINY) // < 256M
-#define EC_ALLOCTOR_GC_MINHEAPS 2
+#define EC_ALLOCTOR_GC_MINHEAPS 1
 #elif defined(_MEM_SML) // < 1G
-#define EC_ALLOCTOR_GC_MINHEAPS 3
+#define EC_ALLOCTOR_GC_MINHEAPS 2
 #else
-#define EC_ALLOCTOR_GC_MINHEAPS 5
+#define EC_ALLOCTOR_GC_MINHEAPS 3
 #endif
 #endif
 
 #ifndef EC_SIZE_BLK_ALLOCATOR
-#define EC_SIZE_BLK_ALLOCATOR 16
+#define EC_SIZE_BLK_ALLOCATOR 32
 #endif
 
 namespace ec {
-	class null_lock final // null lock for map
+	class null_lock final // null lock
 	{
 	public:
 		void lock() { }
@@ -123,11 +143,9 @@ namespace ec {
 
 		void* malloc_(size_t size)
 		{
-			if (size > _SIZE)
-				return ::malloc(size);
 			safe_lock<LOCK> lck(&_lck);
-			if (!_phead)
-				return ::malloc(_SIZE);
+			if (size > _SIZE || !_phead)
+				return ::malloc(size);
 			t_blk* pret = _phead;
 			_phead = _phead->pnext;
 			--_numfree;
@@ -187,6 +205,8 @@ namespace ec{
 
 		static void* operator new(size_t size);
 		static void operator delete(void* p);
+		static void* operator new(size_t size, void* ptr) { return ptr; }
+		static void operator delete(void* ptr, void* voidptr2) noexcept {}
 	public:
 		memheap_(void* palloc) :_numfree(0), _numblk(0), _sizeblk(0), _pmem(nullptr),
 			_phead(nullptr), _palloc(palloc), _pnext(nullptr)
@@ -195,7 +215,7 @@ namespace ec{
 		~memheap_()
 		{
 			if (_pmem) {
-				free(_pmem);
+				::free(_pmem);
 				_pmem = nullptr;
 				_phead = nullptr;
 				_numblk = 0;
@@ -209,7 +229,7 @@ namespace ec{
 		{
 			if (sizeblk % EC_ALLOCTOR_ALIGN)
 				sizeblk += (EC_ALLOCTOR_ALIGN - sizeblk % EC_ALLOCTOR_ALIGN);
-			_pmem = (char*)malloc(numblk * (sizeblk + EC_ALLOCTOR_ALIGN));
+			_pmem = (char*)::malloc(numblk * (sizeblk + EC_ALLOCTOR_ALIGN));
 			if (!_pmem)
 				return false;
 			_sizeblk = sizeblk;
@@ -289,6 +309,8 @@ namespace ec{
 
 		static void* operator new(size_t size);
 		static void operator delete(void* p);
+		static void* operator new(size_t size, void* ptr) { return ptr; }
+		static void operator delete(void* ptr, void* voidptr2) noexcept {}
 
 		blk_alloctor() :
 			_phead(nullptr),
@@ -323,10 +345,17 @@ namespace ec{
 			_numblksperheap = 0;
 		}
 
-		bool init(size_t sizeblk, size_t numblk)
+		bool init(size_t sizeblk, size_t numblk, bool balloc = true)
 		{
 			if (_phead)
 				return true;
+			if (!balloc) {
+				if (sizeblk % EC_ALLOCTOR_ALIGN)
+					sizeblk += (EC_ALLOCTOR_ALIGN - sizeblk % EC_ALLOCTOR_ALIGN);
+				_sizeblk = (uint32_t)sizeblk;
+				_numblksperheap = (uint32_t)numblk;
+				return true;
+			}
 			_phead = new memheap_(this);
 			if (!_phead)
 				return false;
@@ -397,7 +426,8 @@ namespace ec{
 			assert((*pheap)->getalloc() == this);
 			(*pheap)->free_(p);
 			_numfreeblks++;
-			if (_numheaps > EC_ALLOCTOR_GC_MINHEAPS && (*pheap)->canfree() && (*pheap) != _phead)
+			if (_numheaps > EC_ALLOCTOR_GC_MINHEAPS && (*pheap)->canfree() && (*pheap) != _phead 
+				&& _numfreeblks % (int32_t)_numblksperheap)//防止不断整块分配和释放
 				gc_();
 			_lck.unlock();
 			return true;
@@ -409,7 +439,7 @@ namespace ec{
 			pheap->free_(p);
 			_numfreeblks++;
 			if (_numheaps > EC_ALLOCTOR_GC_MINHEAPS && pheap->canfree() && pheap != _phead 
-				&& _numfreeblks % (int32_t)_numblksperheap)
+				&& _numfreeblks % (int32_t)_numblksperheap)//防止不断整块分配和释放
 				gc_();
 			_lck.unlock();
 			return true;
@@ -460,12 +490,12 @@ namespace ec{
 		PA_ _alloctors[EC_SIZE_BLK_ALLOCATOR];
 
 	public:
-		bool add_alloctor(size_t sizeblk, size_t numblk)
+		bool add_alloctor(size_t sizeblk, size_t numblk, bool balloc = true)
 		{
 			if (_size == sizeof(_alloctors) / sizeof(PA_))
 				return false;
 			PA_ p = new blk_alloctor<spinlock>;
-			if (!p->init(sizeblk, numblk)) {
+			if (!p->init(sizeblk, numblk, balloc)) {
 				delete p;
 				return false;
 			}
@@ -473,22 +503,22 @@ namespace ec{
 			return true;
 		}
 	public:
-		allocator() :_size(0) {
+		allocator() :_size(0), _alloctors{ nullptr } {
 		}
 
 		allocator(size_t sizetiny, size_t numtiny,
 			size_t sizesml = 0, size_t numsml = 0,
 			size_t sizemid = 0, size_t nummid = 0,
 			size_t sizelg = 0, size_t numlg = 0
-		) :_size(0) {
+		) :_size(0), _alloctors{ nullptr } {
 			if (sizetiny && numtiny)
 				add_alloctor(sizetiny, numtiny);
 			if (sizesml && numsml)
 				add_alloctor(sizesml, numsml);
 			if (sizemid && nummid)
-				add_alloctor(sizemid, nummid);
+				add_alloctor(sizemid, nummid, false);
 			if (sizelg && numlg)
-				add_alloctor(sizelg, numlg);
+				add_alloctor(sizelg, numlg, false);
 		}
 
 		~allocator() {
@@ -518,8 +548,21 @@ namespace ec{
 					*psize = size;
 				return reinterpret_cast<char*>(pret) + EC_ALLOCTOR_ALIGN;
 			}
-
-			for (auto i = 0u; i < _size; i++) {
+			uint32_t i = 0u;
+			if (_size > 16) { // 1/2 find
+				int nl = 0, nh = (int)_size - 1, nm = 0;
+				while (nl <= nh) {
+					nm = (nl + nh) / 2;
+					if (_alloctors[nm]->sizeblk() < size)
+						nl = nm + 1;
+					else if (_alloctors[nm]->sizeblk() > size)
+						nh = nm - 1;
+					else 
+						break;
+				}
+				i = nm;
+			}
+			for (; i < _size; i++) {
 				if (_alloctors[i]->sizeblk() >= size) {
 					pret = _alloctors[i]->malloc_(size, psize);
 					return pret;
@@ -608,9 +651,9 @@ namespace ec{
 #if defined(_MEM_TINY) // < 256M
 	using selfalloctor = tinyalloc_<zselfblksize, 512, spinlock>; //32K
 #elif defined(_MEM_SML) // < 1G
-	using selfalloctor = tinyalloc_<zselfblksize, 1024, spinlock>; //64k
-#else
 	using selfalloctor = tinyalloc_<zselfblksize, 2048, spinlock>; //128k
+#else
+	using selfalloctor = tinyalloc_<zselfblksize, 4096, spinlock>; //256k
 #endif
 #else
 	using selfalloctor = tinyalloc_<zselfblksize, EC_ALLOCATOR_SELF_SIZE, spinlock>;
@@ -641,17 +684,26 @@ ec::allocator* get_ec_allocator();
 class ec_allocator_ {
 public:
 	ec_allocator_() {
-#if defined(_MEM_TINY) // < 256M
-		size_t zbase = 32;
-#else
-		size_t zbase = 64;
-#endif
-		for (int i = 0; i < EC_ALLOCTOR_HEAP_NUM && i < EC_SIZE_BLK_ALLOCATOR; i++) {
-			if(i < 2)
-				_alloctor.add_alloctor(zbase - EC_ALLOCTOR_ALIGN, EC_ALLOCTOR_HEAP_SIZE / zbase);
-			else
-				_alloctor.add_alloctor(zbase + i * 8u, EC_ALLOCTOR_HEAP_SIZE / zbase);
-			zbase *= 2u;
+		size_t sheaps[9]{ 40, 80, 128, 256, 320, 512, 640, 800, 1024 };
+		size_t mheaps[9]{ 2* 1024, 3 * 1024, 5 * 1024, 8 * 1024, 12 * 1024, 16 * 1024, 16 * 1024, 24 * 1024, 32 * 1024 };
+		size_t hheaps[9]{ 40 * 1024, 64 * 1024, 128 * 1024, 256 * 1024, 320 * 1024, 512 * 1024, 1024 * 1024, 2 * 1024 * 1024 , 4 * 1024 * 1024 };
+
+		for (auto i = 0u; i < sizeof(sheaps) / sizeof(size_t); i++) {
+			if (EC_ALLOCTOR_SHEAP_SIZE / sheaps[i] < 4)
+				break;
+			_alloctor.add_alloctor(sheaps[i] - EC_ALLOCTOR_ALIGN, EC_ALLOCTOR_SHEAP_SIZE / sheaps[i], i < 3);
+		}
+
+		for (auto i = 0u; i < sizeof(mheaps) / sizeof(size_t); i++) {
+			if (EC_ALLOCTOR_MHEAP_SIZE / mheaps[i] < 4)
+				break;
+			_alloctor.add_alloctor(mheaps[i] - EC_ALLOCTOR_ALIGN, EC_ALLOCTOR_MHEAP_SIZE / mheaps[i], false);
+		}
+
+		for (auto i = 0u; i < sizeof(hheaps) / sizeof(size_t); i++) {
+			if (EC_ALLOCTOR_HHEAP_SIZE / hheaps[i] < 4)
+				break;
+			_alloctor.add_alloctor(hheaps[i] - EC_ALLOCTOR_ALIGN, EC_ALLOCTOR_HHEAP_SIZE / hheaps[i], false);
 		}
 	}
 	ec::selfalloctor _alloctor_self;
@@ -747,8 +799,67 @@ namespace ec {
 		return false;
 	}
 
+	template <class OBJ, class... _Types>
+	OBJ* newobj(_Types&&... _Args) {
+		void* pobj = get_ec_allocator()->malloc_(sizeof(OBJ));
+		new ((void*)pobj) OBJ(std::forward<_Types>(_Args)...);
+		return (OBJ*)pobj;
+	}
+
+	template <class OBJ>
+	void delobj(OBJ* pobj) {
+		if (pobj) {
+			pobj->~OBJ();
+			get_ec_allocator()->free_(pobj);
+		}
+	}
 } // namespace ec
 
+inline void* ec_malloc(size_t size, size_t* psize = nullptr) {
+	return  get_ec_allocator()->malloc_(size, psize);
+}
+
+inline void* ec_realloc(void* ptr, size_t size, size_t* psize = nullptr)
+{
+	return  get_ec_allocator()->realloc_(ptr, size, psize);
+}
+
+inline void ec_free(void* ptr)
+{
+	if (ptr)
+		get_ec_allocator()->free_(ptr);
+}
+
+inline void* ec_calloc(size_t num, size_t size)
+{
+	void* pr = get_ec_allocator()->malloc_(num * size);
+	if (pr)
+		memset(pr, 0, num * size);
+	return pr;
+}
+
+inline size_t ec_maxblksize() {
+	return get_ec_allocator()->maxblksize();
+}
+
+#ifndef _USE_EC_OBJ_ALLOCATOR
+#define _USE_EC_OBJ_ALLOCATOR \
+static void* operator new(size_t size)\
+{\
+	return get_ec_allocator()->malloc_(size);\
+}\
+static void* operator new(size_t size, void* ptr)\
+{\
+	return ptr;\
+}\
+static void operator delete(void* p)\
+{\
+	get_ec_allocator()->free_(p);\
+}\
+static void operator delete(void* ptr, void* voidptr2) noexcept\
+{\
+}
+#endif
 /*
 // tstmem.cpp 
 // test ec_allocator

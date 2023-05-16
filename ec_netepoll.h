@@ -3,7 +3,7 @@
 * base net server class use epoll for linux
 * 
 * @author jaingyong
-* 
+* update 2023-5.13 remove ec::memory
 * update 2023-2-9 first version
 * 
 * * eclib 3.0 Copyright (c) 2017-2023, kipway
@@ -17,7 +17,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_memory.h"
 #include "ec_log.h"
 #include "ec_map.h"
-
+#include "ec_vector.hpp"
 #ifndef SIZE_MAX_FD
 #define SIZE_MAX_FD  16384 //最大fd连接数
 #endif
@@ -32,7 +32,6 @@ namespace ec {
 		class serverepoll_
 		{
 		protected:
-			ec::memory* _piomem;
 			ec::ilog* _plog;
 
 			int _fdepoll;
@@ -157,10 +156,7 @@ namespace ec {
 			}
 
 		public:
-			serverepoll_(ec::memory* piomem, ec::ilog* plog) : _piomem(piomem)
-				, _plog(plog)
-				, _fdepoll(-1)
-				, _lastwaiterr(-100)
+			serverepoll_(ec::ilog* plog) : _plog(plog), _fdepoll(-1), _lastwaiterr(-100)
 			{
 			}
 			virtual ~serverepoll_() {
@@ -188,7 +184,7 @@ namespace ec {
 			*/
 			void close()
 			{
-				std::vector<int> fds;
+				ec::vector<int> fds;
 				fds.reserve(1024);
 				_net.getall(fds);
 

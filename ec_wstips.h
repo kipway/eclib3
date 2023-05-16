@@ -2,7 +2,8 @@
 \file ec_wstips.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.4.26
+\update 2023.5.13
+2023.5.13 use zlibe self memory allocator
 
 functions used by websocket
 
@@ -24,7 +25,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #define HTTP_MAX_RANG_SIZE (1024 * 1024 * 8u)
 #endif
 
-#define EC_SIZE_WS_FRAME (1024 * 62) // out put WS frame size
+#define EC_SIZE_WS_FRAME (1024 * 30) // out put WS frame size
 
 #ifndef MAXSIZE_WS_READ_FRAME
 #	define MAXSIZE_WS_READ_FRAME (4 * 1024 * 1024) // read max ws frame size
@@ -54,6 +55,16 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #define SIZE_WSZLIBTEMP 32768
 namespace ec
 {
+#ifdef _ZLIB_SELF_ALLOC
+	inline void* zlib_alloc(void* opaque, uInt items, uInt size)
+	{
+		return ec_malloc(items * size);
+	}
+	inline void zlib_free(void* opaque, void* pf)
+	{
+		ec_free(pf);
+	}
+#endif
 	template <class _Out>
 	int ws_encode_zlib(const void *pSrc, size_t size_src, _Out* pout)//pout first two byte x78 and x9c,the end  0x00 x00 xff xff, no  adler32
 	{
@@ -64,8 +75,13 @@ namespace ec
 		stream.next_in = (z_const Bytef *)pSrc;
 		stream.avail_in = (uInt)size_src;
 
+#ifdef _ZLIB_SELF_ALLOC
+		stream.zalloc = ec::zlib_alloc;
+		stream.zfree = ec::zlib_free;
+#else
 		stream.zalloc = (alloc_func)0;
 		stream.zfree = (free_func)0;
+#endif
 		stream.opaque = (voidpf)0;
 
 		err = deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY);
@@ -102,8 +118,13 @@ namespace ec
 		stream.next_in = (z_const Bytef *)pSrc;
 		stream.avail_in = (uInt)size_src;
 
+#ifdef _ZLIB_SELF_ALLOC
+		stream.zalloc = ec::zlib_alloc;
+		stream.zfree = ec::zlib_free;
+#else
 		stream.zalloc = (alloc_func)0;
 		stream.zfree = (free_func)0;
+#endif
 		stream.opaque = (voidpf)0;
 
 		err = inflateInit(&stream);
@@ -135,7 +156,7 @@ namespace ec
 		unsigned char uc;
 		const uint8_t* pds = (const uint8_t*)pdata;
 		size_t slen = sizes;
-		bytes tmp(pout->get_allocator());
+		bytes tmp;
 		tmp.reserve(2048 + sizes - sizes % 1024);
 		if (ncompress && sizes >= 128) {
 			if (Z_OK != ws_encode_zlib(pdata, sizes, &tmp) || tmp.size() < 6)
@@ -192,13 +213,13 @@ namespace ec
 		return true;
 	}
 
-	template <class _Out>
+	template <class _Out = vstream>
 	bool ws_make_perfrm(const void* pdata, size_t sizes, unsigned char wsopt, _Out* pout, uint32_t umask = 0)//multi-frame,deflate-frame, for ios safari
 	{
 		const uint8_t* pds = (const uint8_t*)pdata;
 		uint8_t* pf;
 		size_t slen = sizes;
-		bytes tmp(pout->get_allocator());
+		bytes tmp;
 		tmp.reserve(EC_SIZE_WS_FRAME);
 		unsigned char uc;
 		size_t ss = 0, us, fl;

@@ -3,8 +3,8 @@
 
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.12.26
-
+\update 2020.5.13
+2023.5.13 remove ec::memory
 httpsrv
 	class for http/https server
 
@@ -38,7 +38,7 @@ namespace ec
 		class httpsrv : public server  // http/https server
 		{
 		public:
-			httpsrv(ilog* plog, memory* pmem, mimecfg* pmine) : server(pmem, plog),
+			httpsrv(ilog* plog, mimecfg* pmine) : server(plog),
 				_pmine(pmine), _pathhttp{ 0 }
 			{
 			}
@@ -79,7 +79,7 @@ namespace ec
 			bool httpwrite_401(uint32_t ucid, http::package* pPkg, const char* html = nullptr, size_t htmlsize = 0, const char* stype = nullptr)
 			{
 				try {
-					bytes vs(_pmem);
+					bytes vs;
 					vs.reserve(1024 * 4);
 					if (!pPkg->make(&vs, 401, "Unauthorized", stype, "WWW-Authenticate: Basic\r\n", html, htmlsize))
 						return false;
@@ -95,8 +95,8 @@ namespace ec
 			bool httpwrite(uint32_t ucid, http::package* pPkg, const char* html, size_t size, const char* stype)
 			{
 				try {
-					bytes vs(_pmem);
-					vs.reserve(1024 * 32);
+					bytes vs;
+					vs.reserve(1024 * 16);
 					str128 content_type;
 					bool bzip = true;
 					if (stype && *stype) {
@@ -119,7 +119,7 @@ namespace ec
 				if (plog->getlevel() < loglevel)
 					return;
 				try {
-					vector<char> vs(_pmem);
+					ec::string vs;
 					vs.reserve(4096);
 					for (auto &i : ph->_head) {
 						vs += '\t';
@@ -159,7 +159,7 @@ namespace ec
 						httpreterr(ucid, http_sret404, 404);
 						return pPkg->HasKeepAlive();
 					}
-					vector<char> answer(_pmem);
+					ec::string answer;
 					answer.reserve(1024 * 4);
 
 					answer += "HTTP/1.1 200 ok\r\nServer: eclib web server\r\n";
@@ -185,8 +185,8 @@ namespace ec
 			bool downfile(uint32_t ucid, http::package* pPkg, const char* sfile)
 			{
 				try {
-					vector<char> data(_pmem);
-					data.reserve(1024 * 32);
+					ec::string data;
+					data.reserve(1024 * 16);
 					if (!ec::io::lckread(sfile, &data) || !data.size()) {
 						httpreterr(ucid, ec::http_sret404, 404);
 						return pPkg->HasKeepAlive();
@@ -205,8 +205,8 @@ namespace ec
 			{
 				try {
 					str1k tmp;
-					vector<char> answer(_pmem);
-					answer.reserve(1024 * 32);
+					ec::string answer;
+					answer.reserve(1024 * 16);
 
 					answer += "HTTP/1.1 206 Partial Content\r\nServer: eclib web server\r\n";
 					if (pPkg->HasKeepAlive())
@@ -222,8 +222,8 @@ namespace ec
 					else
 						answer += "Content-type: application/octet-stream\r\n";
 
-					vector<char> filetmp(_pmem);
-					filetmp.reserve(1024 * 32);
+					ec::string filetmp;
+					filetmp.reserve(1024 * 16);
 					if (!io::lckread(sfile, &filetmp, lpos, lsize)) {
 						httpreterr(ucid, ec::http_sret404, 404);
 						return pPkg->HasKeepAlive();

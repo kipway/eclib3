@@ -436,7 +436,7 @@ namespace ec
 		/*!
 		\brief lock read whole file for linux
 
-		pout ec::cBytes or ec::vector<char>
+		pout ec::bytes or ec::string
 
 		S_IRWXU  00700 user (file owner) has read, write and execute permission
 		S_IRUSR  00400 user has read permission

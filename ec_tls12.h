@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update:
+2023.5.13  remove ec::memory
 2023.2.6   add srvca::isok()
 
 TLS1.2(rfc5246)  session class
@@ -189,27 +190,7 @@ namespace ec
 			array<uint8_t, 640 > _cli_key_exchange;
 			array<uint8_t, 512>  _cli_finished;
 		public:
-			static handshake* new_cls(memory* _pmem = nullptr)
-			{
-				if (!_pmem)
-					return new handshake();
-				handshake* p = (handshake*)_pmem->mem_malloc(sizeof(handshake));
-				if (p)
-					new(p)handshake();
-				return p;
-			}
-			static void del_cls(handshake* p, memory * _pmem = nullptr)
-			{
-				if (!p)
-					return;
-				if (_pmem) {
-					p->~handshake();
-					_pmem->mem_free(p);
-				}
-				else
-					delete p;
-			}
-
+			_USE_EC_OBJ_ALLOCATOR
 			template<class _Out>
 			void out(_Out* p, bool bfin = false)
 			{
@@ -242,20 +223,20 @@ namespace ec
 			using tlsrec = ec::array<uint8_t, TLS_REC_BUF_SIZE>;
 			session(const session&) = delete;
 			session& operator = (const session&) = delete;
-			session(bool bserver, unsigned int ucid, memory* pmem, ilog* plog) : _pmem(pmem), _plog(plog),
+			session(bool bserver, unsigned int ucid, ilog* plog) : _plog(plog),
 				_ucid(ucid), _bserver(bserver), _breadcipher(false), _bsendcipher(false), _seqno_send(0), _seqno_read(0), _cipher_suite(0),
-				_pkgtcp(pmem), _bhandshake_finished(false)
+				_bhandshake_finished(false)
 			{
 				_key_swmac[0] = 0;
 				_keyblock[0] = 0;
 				_serverrand[0] = 0;
 				resetblks();
-				_hmsg = handshake::new_cls(_pmem);
+				_hmsg = new handshake;
 			};
 			
-			session(session*p) : _pmem(p->_pmem), _plog(p->_plog), _ucid(p->_ucid), _bserver(p->_bserver), _breadcipher(p->_breadcipher),
+			session(session*p) : _plog(p->_plog), _ucid(p->_ucid), _bserver(p->_bserver), _breadcipher(p->_breadcipher),
 				_bsendcipher(p->_bsendcipher), _seqno_send(p->_seqno_send), _seqno_read(p->_seqno_read), _cipher_suite(p->_cipher_suite),
-				_pkgtcp(p->_pmem), _bhandshake_finished(p->_bhandshake_finished)
+				_bhandshake_finished(p->_bhandshake_finished)
 			{
 				_pkgtcp.free();
 				_pkgtcp.append(p->_pkgtcp.data_(), p->_pkgtcp.size_());
@@ -275,7 +256,7 @@ namespace ec
 				memcpy(_key_block, p->_key_block, sizeof(_key_block));
 			}
 
-			session(session&& v) : _pmem(v._pmem), _plog(v._plog), _ucid(v._ucid), _bserver(v._bserver), _breadcipher(v._breadcipher),
+			session(session&& v) : _plog(v._plog), _ucid(v._ucid), _bserver(v._bserver), _breadcipher(v._breadcipher),
 				_bsendcipher(v._bsendcipher), _seqno_send(v._seqno_send), _seqno_read(v._seqno_read), _cipher_suite(v._cipher_suite),
 				_pkgtcp(std::move(v._pkgtcp)), _bhandshake_finished(v._bhandshake_finished)
 			{
@@ -297,7 +278,7 @@ namespace ec
 			virtual ~session()
 			{
 				if (_hmsg) {
-					handshake::del_cls(_hmsg, _pmem);
+					delete _hmsg;
 					_hmsg = nullptr;
 				}
 			};
@@ -305,14 +286,10 @@ namespace ec
 			{
 				return _ucid;
 			}
-			inline memory* getpmem() {
-				return _pmem;
-			}
 			inline void appendreadbytes(const void* pdata, size_t size) {
 				_pkgtcp.append(pdata, size);
 			}
 		protected:
-			memory * _pmem;
 			ilog* _plog;
 
 			uint32_t _ucid;
@@ -600,7 +577,7 @@ namespace ec
 				if (_hmsg)
 					_hmsg->clear();
 				else
-					_hmsg = handshake::new_cls(_pmem);
+					_hmsg = new handshake;
 				resetblks();
 			}
 
@@ -754,7 +731,7 @@ namespace ec
 		class sessionclient : public session // session for client
 		{
 		public:
-			sessionclient(uint32_t ucid, memory* pmem, ilog* plog) : session(false, ucid, pmem, plog), _pkgm(pmem)
+			sessionclient(uint32_t ucid, ilog* plog) : session(false, ucid, plog)
 			{
 				_prsa = nullptr;
 				_pevppk = nullptr;
@@ -964,7 +941,7 @@ namespace ec
 						return false;
 					}
 				}
-				handshake::del_cls(_hmsg, _pmem);//Handshake completed, delete Handshake message
+				delete _hmsg;//Handshake completed, delete Handshake message
 				_hmsg = nullptr;
 				return true;
 			}
@@ -1064,9 +1041,8 @@ namespace ec
 		{
 		public:
 			sessionserver(uint32_t ucid, const void* pcer, size_t cerlen,
-				const void* pcerroot, size_t cerrootlen, std::mutex *pRsaLck, RSA* pRsaPrivate, memory* pmem, ilog* plog
-			) : session(true, ucid, pmem, plog),
-				_pkgm(pmem)
+				const void* pcerroot, size_t cerrootlen, std::mutex *pRsaLck, RSA* pRsaPrivate, ilog* plog
+			) : session(true, ucid, plog)
 			{
 				_pcer = pcer;
 				_cerlen = cerlen;
@@ -1077,7 +1053,7 @@ namespace ec
 				memset(_sip, 0, sizeof(_sip));
 			}
 
-			sessionserver(sessionserver*p) : session(p), _pkgm(p->_pmem)
+			sessionserver(sessionserver*p) : session(p)
 			{
 				_pRsaLck = p->_pRsaLck;
 				_pRsaPrivate = p->_pRsaPrivate;
@@ -1372,7 +1348,7 @@ namespace ec
 					return false;
 				if (_plog)
 					_plog->add(CLOG_DEFAULT_DBG, "ucid(%u) ClientFinished success!", _ucid);
-				handshake::del_cls(_hmsg, _pmem);//Handshake completed, delete Handshake message
+				delete _hmsg;//Handshake completed, delete Handshake message
 				_hmsg = nullptr;
 				return true;
 			}

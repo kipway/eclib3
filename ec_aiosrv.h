@@ -50,7 +50,7 @@ namespace ec {
 			tls::srvca _ca;  // certificate
 #endif
 		public:
-			netserver(ec::memory* piomem, ec::ilog* plog) : netserver_(piomem, plog)
+			netserver(ec::ilog* plog) : netserver_(plog)
 				, _sndbufblks(EC_AIO_SNDBUF_BLOCKSIZE - EC_ALLOCTOR_ALIGN, EC_AIO_SNDBUF_HEAPSIZE / EC_AIO_SNDBUF_BLOCKSIZE)
 			{
 			}
@@ -194,7 +194,7 @@ namespace ec {
 					_plog->add(CLOG_DEFAULT_ERR, "connect tcp://%s:%u failed.", netaddr.viewip(), port);
 					return -1;
 				}
-				psession pss = new session(&_sndbufblks, fd, _piomem);
+				psession pss = new session(&_sndbufblks, fd);
 				if (!pss) {
 					_plog->add(CLOG_DEFAULT_ERR, "new session memory error");
 					close_(fd);
@@ -330,7 +330,7 @@ namespace ec {
 				psession pss = nullptr;
 				if (!_mapsession.get(kfd, pss))
 					return -1;
-				ec::bytes msg(_piomem);
+				ec::bytes msg;
 				int msgtype = pss->onrecvbytes(pdata, size, _plog, &msg);
 				if (EC_AIO_PROC_TCP == pss->_protocol && EC_AIO_MSG_TCP == msgtype) {
 					pss->_rbuf.append(msg.data(), msg.size());
@@ -382,7 +382,7 @@ namespace ec {
 			virtual void onAccept(int fd, const char* sip, uint16_t port, int fdlisten)
 			{
 				_plog->add(CLOG_DEFAULT_DBG, "onAccept fd(%d), listenfd(%d)", fd, fdlisten);
-				psession pss = new session(&_sndbufblks, fd, _piomem, fdlisten);
+				psession pss = new session(&_sndbufblks, fd, fdlisten);
 				if (!pss)
 					return;
 				pss->_status = EC_AIO_FD_CONNECTED;

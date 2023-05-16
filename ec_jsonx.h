@@ -19,7 +19,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include <string>
 #include <math.h>
 #include <float.h>
-#include "ec_vector.h"
+#include "ec_memory.h"
 #include "ec_string.h"
 
 #ifndef MAXSIZE_JSONX_KEY
@@ -80,13 +80,13 @@ namespace ec
 			}
 		};
 	public:
-		ec::vector<t_kv> _kvs;
+		std::vector<t_kv, ec::std_allocator<t_kv>> _kvs;
 	public:
 		json(const json&) = delete;
 		json& operator = (const json&) = delete;
 		json()
 		{
-			_kvs.reserve(256);
+			_kvs.reserve(128);
 		}
 		~json()
 		{

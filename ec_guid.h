@@ -3,12 +3,12 @@
 
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update 2023.5.13
 
 cGuid
 	UUID generator
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -75,7 +75,9 @@ namespace ec
 			_uinfo.seqno++;
 			ec::encode_md5(&_uinfo, sizeof(_uinfo), (unsigned char*)pguid);
 		}
-
+		void uuidmd5(unsigned char md5[16]) {
+			uuid((t_guid*)md5);
+		}
 		void uuid2(unsigned char guid[16], unsigned int seqno)
 		{
 #ifdef _WIN32

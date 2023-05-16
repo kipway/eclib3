@@ -19,6 +19,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_log.h"
 #include "ec_map.h"
 #include "ec_aiosession.h"
+#include "ec_vector.hpp"
 
 #ifndef SIZE_MAX_FD
 #define SIZE_MAX_FD  16384
@@ -134,7 +135,6 @@ namespace ec {
 				return s[op];
 			}
 		protected:
-			ec::memory* _piomem;
 			ec::ilog* _plog;
 
 			HANDLE _hiocp;
@@ -297,10 +297,7 @@ namespace ec {
 				return 0;
 			}
 		public:
-			serveriocp_(ec::memory* piomem, ec::ilog* plog) : _piomem(piomem)
-				, _plog(plog)
-				, _hiocp(nullptr)
-				, _nextfd(0)
+			serveriocp_(ec::ilog* plog) : _plog(plog), _hiocp(nullptr), _nextfd(0)
 			{
 				WSADATA wsaData;// Initialize Winsock
 				int iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -562,7 +559,7 @@ namespace ec {
 			void dorecvflowctrl()//接收流控
 			{
 				t_readflow fl{ 0,0 };
-				std::vector<t_readflow> fds;
+				ec::vector<t_readflow> fds;
 				fds.reserve(256);
 				psession pss;
 				for (auto& i : _mapfd) {
@@ -582,8 +579,8 @@ namespace ec {
 
 			void doaysnconnectout() //处理异步连出
 			{
-				std::vector<int> fdsok;
-				std::vector<int> fdserr;
+				ec::vector<int> fdsok;
+				ec::vector<int> fdserr;
 				fdsok.reserve(256);
 				fdserr.reserve(256);
 				psession pss;
@@ -628,7 +625,7 @@ namespace ec {
 
 			t_overlap* newoverlap(size_t databufsize, int optype, int kfd = 0)
 			{
-				t_overlap* pol = (t_overlap*)get_ec_allocator()->malloc_(sizeof(t_overlap));
+				t_overlap* pol = (t_overlap*)ec_malloc(sizeof(t_overlap));
 				if (!pol)
 					return nullptr;
 				memset(pol, 0, sizeof(t_overlap));
@@ -639,9 +636,9 @@ namespace ec {
 						pol->kfd, optype2str(pol->optype), pol->wsbufsize);
 					return pol;
 				}
-				pol->wsbuf.buf = (char*)_piomem->malloc(databufsize, pol->wsbufsize);
+				pol->wsbuf.buf = (char*)ec_malloc(databufsize, &pol->wsbufsize);
 				if (!pol->wsbuf.buf) {
-					get_ec_allocator()->free_(pol);
+					ec_free(pol);
 					return nullptr;
 				}
 				_plog->add(CLOG_DEFAULT_ALL, "fd(%d) new overlap post %s overlap. wsbufsize=%zu",
@@ -654,10 +651,10 @@ namespace ec {
 				_plog->add(CLOG_DEFAULT_ALL, "fd(%d) free overlap post %s overlap. wsbufsize=%zu, wsbuf.len=%u",
 					pol->kfd, optype2str(pol->optype), pol->wsbufsize, (uint32_t)pol->wsbuf.len);
 				if (pol->wsbuf.buf) {
-					_piomem->free(pol->wsbuf.buf);
+					ec_free(pol->wsbuf.buf);
 					pol->wsbuf.buf = nullptr;
 				}
-				get_ec_allocator()->free_(pol);
+				ec_free(pol);
 			}
 
 			int bind_listen(const struct sockaddr* addr, socklen_t addrlen, t_fd& tfout, int ipv6only = 0) // bind and listen, return fd

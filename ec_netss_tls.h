@@ -2,8 +2,8 @@
 \file ec_netsrv_tls.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.8.4
-
+\update 2023.5.13
+2023.5.13 remove ec::memory
 net::session_tls
 	TLS1.2 session.
 
@@ -40,7 +40,7 @@ namespace ec
 			session_tls(session&& ss, const void* pcer, size_t cerlen,
 				const void* pcerroot, size_t cerrootlen, std::mutex *pRsaLck, RSA* pRsaPrivate) :
 				session(std::move(ss)),
-				_tls(ss._ucid, pcer, cerlen, pcerroot, cerrootlen, pRsaLck, pRsaPrivate, ss._pssmem, ss._psslog)
+				_tls(ss._ucid, pcer, cerlen, pcerroot, cerrootlen, pRsaLck, pRsaPrivate, ss._psslog)
 			{
 				_tls.appendreadbytes(_rbuf.data_(), _rbuf.size_());
 				_rbuf.free();
@@ -94,7 +94,7 @@ namespace ec
 
 			virtual int send(const void* pdata, size_t size, int timeoutmsec = 1000)
 			{
-				bytes tlspkg(_pssmem);
+				bytes tlspkg;
 				tlspkg.reserve(size + 1024 - size % 1024);
 				if (_tls.MakeAppRecord(&tlspkg, pdata, size))
 					return iosend(tlspkg.data(), (int)tlspkg.size());

@@ -16,12 +16,13 @@
 */
 #pragma once
 
-#include "ec_memory.h"
+#include "ec_alloctor.h"
+#include <vector>
 #include "ec_stream.h"
 #include "ec_crc.h"
 #include "ec_log.h"
 #include "ec_map.h"
-#include "ec_string.h"
+#include "ec_vector.hpp"
 
 #ifndef SIZE_UDPBUF_FRMS
 #define SIZE_UDPBUF_FRMS 512 //udp未确认缓冲大小,单位ucp报文数
@@ -111,19 +112,18 @@ namespace ec {
 				t_node* _pprior;
 				t_node* _pnext;
 				uint8_t _frm[SIZE_UDPFRM]; //报文存储区,报文是已经编码完成的。
+				_USE_EC_OBJ_ALLOCATOR
 			};
 			using PNODE = t_node*;
 		protected:
 			t_node* _phead;//最旧的
 			t_node* _ptail;//最新的,新来帧从ptail加入
 			size_t _size; // 个数,动态维护的list的节点数
-			ec::memory* _pmem; //预分配的内存，重复使用
 		public:
-			frmlist(ec::memory* pmem)
+			frmlist()
 				: _phead(nullptr)
 				, _ptail(nullptr)
 				, _size(0)
-				, _pmem(pmem)
 			{
 			}
 
@@ -131,7 +131,7 @@ namespace ec {
 				t_node* pf;
 				while (_phead) {
 					pf = _phead->_pnext;
-					_pmem->free(_phead);
+					delete _phead;
 					_phead = pf;
 				}
 				_size = 0;
@@ -143,13 +143,6 @@ namespace ec {
 				return _size;
 			}
 
-			inline t_node* newnode() {
-				return (t_node*)_pmem->malloc(sizeof(t_node));
-			}
-
-			inline void freenode(t_node* pnode) {
-				_pmem->free(pnode);
-			}
 			/*!
 			* \brief 从尾部插入
 			* \param seqno 帧序号
@@ -164,7 +157,7 @@ namespace ec {
 			{
 				if (!pfrm || frmsize > SIZE_UDPFRM)
 					return -1;
-				t_node* pf = (t_node*)_pmem->malloc(sizeof(t_node));
+				t_node* pf = new t_node;
 				if (!pf)
 					return -1;
 				pf->_seqno = seqno;
@@ -203,7 +196,7 @@ namespace ec {
 
 			t_node* makenode(seqno_t seqno, int64_t  msec, const void* pfrm, size_t frmsize)
 			{
-				t_node* pf = (t_node*)_pmem->malloc(sizeof(t_node));
+				t_node* pf = new t_node;
 				if (!pf)
 					return nullptr;
 				pf->_seqno = seqno;
@@ -340,7 +333,7 @@ namespace ec {
 		class frmlist_send : public frmlist
 		{
 		public:
-			frmlist_send(ec::memory* pmem): frmlist(pmem) {
+			frmlist_send(){
 			}
 			virtual ~frmlist_send() {
 			}
@@ -438,7 +431,7 @@ namespace ec {
 						if (pf == _ptail)
 							_ptail = pf->_pprior;
 						pf = pf->_pnext;
-						_pmem->free(pdel);
+						delete pdel;
 						--_size;
 					}
 					else
@@ -457,7 +450,7 @@ namespace ec {
 		private:
 			seqno_t _maxseqno = 0;
 		public:
-			frmlist_recv(ec::memory* pmem) : frmlist(pmem) {
+			frmlist_recv(){
 			}
 			virtual ~frmlist_recv() {
 			}
@@ -494,7 +487,7 @@ namespace ec {
 				seqno_t no = nxtrcvno;
 				t_node* pf = _phead;
 				while (pf && pf->_seqno == no) {
-					frmout.append(pf);
+					frmout.push_back(pf);
 					pf = pf->_pnext;
 					--_size;
 					++nr;
@@ -765,23 +758,14 @@ namespace ec {
 			udp_chns _udps;//udp通道
 			uint8_t _guid[UCP_GUID_SIZE];//连接的MD5散列值的guid，防止多通道重复连接
 		public:
-			static void* operator new(size_t size)
-			{
-				return get_ec_allocator()->malloc_(size);
-			}
-			static void operator delete(void* p)
-			{
-				get_ec_allocator()->free_(p);
-			}
+			_USE_EC_OBJ_ALLOCATOR
 		public:
-			ucpsocket(uint32_t ssid, int sstype,ec::memory* pmemfrm)
+			ucpsocket(uint32_t ssid, int sstype)
 				: _ssid(ssid)
 				, _nxtsndno(1)
 				, _nxtrcvno(1)
 				, _ackrcvno(0)
 				, _ackmaxsndno(0)
-				, _sbuf(pmemfrm)
-				, _rbuf(pmemfrm)
 				, _sstype(sstype)
 			{
 				_time_lastread = ec::mstime();
@@ -929,12 +913,12 @@ namespace ec {
 					pkg._ussid = _ssid;
 					pkg._seqno = _nxtsndno++;
 					pkg._frmcmd = FRMCMD_DAT;
-					frmlist::t_node* pnode = _sbuf.newnode();
+					frmlist::t_node* pnode = new frmlist::t_node;
 					if (!pnode)
 						return -1;
 					frmlen = pkg.makepkg(pnode->_frm, sizeof(pnode->_frm), ps, nc);
 					if (frmlen < 0) {
-						_sbuf.freenode(pnode);
+						delete pnode;
 						return -1;
 					}
 					pnode->_frmsize = (uint16_t)frmlen;
@@ -1085,9 +1069,8 @@ namespace ec {
 		{
 		public:
 			using PSOCKET = ucpsocket*;
-			ec::memory _memfrm; //udp帧内存分配器
 		protected:
-			std::vector<udp_item> _udps;//udp通道
+			udp_chns _udps;//udp通道
 			uint32_t _nxtssid; //下一个本端ssid, 1-65534，客户端使用低16位，服务端使用高16位，组成一个连接唯一的ID
 			int64_t  _lastruntime;//上次运行时间，用于runtime定时调用
 			ec::ilog* _plog; //日志输出
@@ -1107,7 +1090,7 @@ namespace ec {
 			//最大重发次数[3, 10], 5
 			uint32_t _maxresendcnt;
 
-			std::vector<uint32_t> _delssids; //超时需要删除的连接
+			ec::vector<uint32_t> _delssids; //超时需要删除的连接
 
 			uint32_t mknxtid() // 服务端会将客户端的ID放在低两个字节，服务端的ID放在高两字节作为通信SSID
 			{
@@ -1140,9 +1123,6 @@ namespace ec {
 						_plog->add(CLOG_DEFAULT_DBG, "map size %zu", _map.size());
 				}
 			}
-			void freefrm(void* pfrm) {
-				_memfrm.mem_free(pfrm);
-			}
 		protected:
 			//连接断开通知, status = 0表示正常断开(收到FIN命令)，其他为错误断开
 			void ondisconnected(uint32_t ssid, int status)
@@ -1171,8 +1151,7 @@ namespace ec {
 			}
 			
 		public:
-			ucp() : _memfrm(sizeof(frmlist::t_node) , 2048)
-				, _nxtssid(0)
+			ucp() : _nxtssid(0)
 				, _lastruntime(0)
 				, _plog(nullptr)
 				, _ucpnotify(nullptr)
@@ -1182,9 +1161,9 @@ namespace ec {
 				, _mapcon(64)
 				, _map(128)
 			{
-				_resendtime = 200;
+				_resendtime = 260;
 				_resendackno = 5;
-				_maxresendcnt = 5;
+				_maxresendcnt = 6;
 				_udps.reserve(2);
 			}
 
@@ -1258,7 +1237,7 @@ namespace ec {
 			*/
 			uint32_t connectasyn(const uint8_t* guidmd5)
 			{
-				PSOCKET ps = new ucpsocket(mknxtid(), ucp_conout, &_memfrm);
+				PSOCKET ps = new ucpsocket(mknxtid(), ucp_conout);
 				if (!ps)
 					return 0;
 				memcpy(ps->_guid, guidmd5, UCP_GUID_SIZE);
@@ -1345,7 +1324,7 @@ namespace ec {
 					}
 					
 					uint32_t unxtid = (mknxtid() << 16) | (pkg._ussid & 0xFFFF); //客户端的ssid在低16位
-					pss = new ucpsocket(unxtid, ucp_conin, &_memfrm);//接入的，需要保留对端地址信息
+					pss = new ucpsocket(unxtid, ucp_conin);//接入的，需要保留对端地址信息
 					if (!pss)
 						return -1;
 					pss->addudp(fd, paddr, addrlen);
