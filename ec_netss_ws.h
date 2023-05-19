@@ -92,7 +92,6 @@ namespace ec
 				else if (1 == _nws) {
 					bool bsend;
 					vstream vret;
-					vret.reserve(1024 + size - size % 512);
 					if (_wscompress == ws_x_webkit_deflate_frame) { //deflate-frame
 						bsend = ws_make_perfrm(pdata, size, optcode, &vret);
 					}

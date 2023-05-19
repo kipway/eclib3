@@ -2,7 +2,7 @@
 \file ec_http.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.5.13
+\update 2023.5.18
 2023.5.13 use zlibe self memory allocator
 classes for HTTP protocol parse
 
@@ -94,7 +94,8 @@ namespace ec
 		bool Load(const char* sfile)
 		{
 			_mime.clear();
-			return cfg::scanfile(sfile, [&](const std::string & blk, const std::string & key, const std::string & val) {
+			ec::config<ec::string>  cfg;
+			return cfg.scanfile(sfile, [&](const ec::string & blk, const ec::string & key, const ec::string & val) {
 				if (strieq("mime", blk.c_str()) && key.size() && val.size()) {
 					t_mime t;
 					memset(&t, 0, sizeof(t));
@@ -752,7 +753,7 @@ namespace ec
 			{
 				pout->clear();
 				str1k stmp;
-				if (!stmp.printf("HTTP/1.1 %d %s\r\n", statuscode, statusmsg))
+				if (!stmp.format("HTTP/1.1 %d %s\r\n", statuscode, statusmsg))
 					return false;
 				pout->append(stmp.data(), stmp.size());
 				if (HasKeepAlive())
@@ -766,7 +767,7 @@ namespace ec
 					return true;
 				}
 				if (Content_type && *Content_type) {
-					if (!stmp.printf("Content-type: %s\r\n", Content_type))
+					if (!stmp.format("Content-type: %s\r\n", Content_type))
 						return false;
 					pout->append(stmp.data(), stmp.size());
 				}
@@ -790,14 +791,14 @@ namespace ec
 					}
 				}
 				size_t poslen = pout->size(), sizehead;
-				if (!stmp.printf("Content-Length: %9d\r\n\r\n", (int)bodysize))
+				if (!stmp.format("Content-Length: %9d\r\n\r\n", (int)bodysize))
 					return false;
 				pout->append(stmp.data(), stmp.size());
 				sizehead = pout->size();
 				if (bdeflate) {
 					if (Z_OK != encode_body(pbody, bodysize, pout, bdeflate == 2))
 						return false;
-					if (!stmp.printf("Content-Length: %9d\r\n\r\n", (int)(pout->size() - sizehead)))
+					if (!stmp.format("Content-Length: %9d\r\n\r\n", (int)(pout->size() - sizehead)))
 						return false;
 					memcpy((char*)pout->data() + poslen, stmp.data(), stmp.size());
 				}

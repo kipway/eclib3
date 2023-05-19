@@ -623,7 +623,8 @@ namespace ec{
 			printf("}\n\n");
 		}
 
-		void meminfo(std::string &sout) // for debug
+		template<class STR_ = std::string>
+		void meminfo(STR_& sout) // for debug
 		{
 			char stmp[256];
 			sout.append("\nec::alloctor{\n");
@@ -684,9 +685,9 @@ ec::allocator* get_ec_allocator();
 class ec_allocator_ {
 public:
 	ec_allocator_() {
-		size_t sheaps[9]{ 40, 80, 128, 256, 320, 512, 640, 800, 1024 };
-		size_t mheaps[9]{ 2* 1024, 3 * 1024, 5 * 1024, 8 * 1024, 12 * 1024, 16 * 1024, 16 * 1024, 24 * 1024, 32 * 1024 };
-		size_t hheaps[9]{ 40 * 1024, 64 * 1024, 128 * 1024, 256 * 1024, 320 * 1024, 512 * 1024, 1024 * 1024, 2 * 1024 * 1024 , 4 * 1024 * 1024 };
+		size_t sheaps[10]{ 40, 80, 128, 256, 320, 512, 640, 800, 1024, 1600 };
+		size_t mheaps[10]{ 2* 1024, 3 * 1024, 5 * 1024, 8 * 1024, 12 * 1024, 16 * 1024, 20 * 1024, 24 * 1024, 32 * 1024, 48 * 1024 };
+		size_t hheaps[8]{ 64 * 1024, 128 * 1024, 256 * 1024, 400 * 1024, 640 * 1024, 1024 * 1024, 2 * 1024 * 1024 , 4 * 1024 * 1024 };
 
 		for (auto i = 0u; i < sizeof(sheaps) / sizeof(size_t); i++) {
 			if (EC_ALLOCTOR_SHEAP_SIZE / sheaps[i] < 4)
@@ -875,7 +876,6 @@ static void operator delete(void* ptr, void* voidptr2) noexcept\
 // std_queue(us): create =  4407928, delete = 1276998, sum =  5684926, total =  5684926
 
 #include "ec_system.h"
-#define EC_ALLOCTOR_HEAP_SIZE (4 * 1024 * 1024) // 4M heap size
 #include "ec_alloctor.h"
 DECLARE_EC_GLIBC_NOARENA
 DECLARE_EC_ALLOCTOR

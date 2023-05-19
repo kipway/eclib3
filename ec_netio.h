@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 update:
+2023.5.18 update net::url support string template arg
 2023.2.10 update net::url support none protocol
 2023.2.3  update net::url
 2023.2.3  add socketaddr for ipv4 and ipv6
@@ -776,6 +777,7 @@ namespace ec
 			kipway.net/path
 			kipway.net/path?level=dbg
 		*/
+		template<class STR_ = std::string>
 		class url
 		{
 		public:
@@ -785,7 +787,7 @@ namespace ec
 			{
 				clear();
 				size_t i = 0;
-				std::string str;
+				STR_ str;
 				_tochar(i, ':', surl, urlsize, _protocol);
 				if (_protocol.empty() || (i + 2 >= urlsize || surl[i] != '/' || surl[i + 1] != '/')) {
 					i = 0;
@@ -835,7 +837,8 @@ namespace ec
 				_path.clear();
 				_args.clear();
 			}
-			void _tochar(size_t& pos, char c, const char* surl, size_t urlsize, std::string& so)
+
+			void _tochar(size_t& pos, char c, const char* surl, size_t urlsize, STR_& so)
 			{ // 从当前读取字符到so，直到遇到c(不包含), pos跳过c位置。
 				while (pos < urlsize) {
 					if (surl[pos] == c) {
@@ -852,11 +855,11 @@ namespace ec
 			}
 		public:
 			uint16_t _port;
-			std::string _protocol;
-			std::string _ip;
-			std::string _ipv6;
-			std::string _path;
-			std::string _args;
+			STR_ _protocol;
+			STR_ _ip;
+			STR_ _ipv6;
+			STR_ _path;
+			STR_ _args;
 		};
 
 		inline void setfd_cloexec(SOCKET fd)

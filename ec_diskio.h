@@ -2,7 +2,7 @@
 \file ec_diskio.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2021.9.29
+\update 2023.5.19
 
 io
 	tools for disk IO，use utf-8 parameters
@@ -10,7 +10,7 @@ io
 cdir
 	class for file and directory search.
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -48,9 +48,7 @@ namespace ec
 	};
 	namespace io
 	{
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			FILE *fopen(const charT* utf8file, const charT* utf8mode)
+		inline FILE *fopen(const char* utf8file, const char* utf8mode)
 		{
 #ifdef _WIN32
 			UINT codepage = ec::strisutf8(utf8file) ? CP_UTF8 : CP_ACP;
@@ -67,9 +65,7 @@ namespace ec
 #endif
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			int remove(const charT* utf8filename)
+		inline int remove(const char* utf8filename)
 		{
 #ifdef _WIN32
 			wchar_t sfile[512];
@@ -83,9 +79,7 @@ namespace ec
 		}
 
 #ifdef _WIN32
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			bool exist(const charT* utf8filename)
+		inline bool exist(const char* utf8filename)
 		{
 			wchar_t sfile[512];
 			sfile[0] = 0;
@@ -95,9 +89,7 @@ namespace ec
 			return true;
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			bool createdir(const charT* utf8path)
+		inline bool createdir(const char* utf8path)
 		{
 			UINT codepage = ec::strisutf8(utf8path) ? CP_UTF8 : CP_ACP;
 			int i = 0;
@@ -131,9 +123,7 @@ namespace ec
 			return true;
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			long long getdiskspace(const charT* utf8path) // lpszDisk format is "c:\"
+		inline long long getdiskspace(const char* utf8path) // lpszDisk format is "c:\"
 		{
 			wchar_t wpath[512];
 			if (!MultiByteToWideChar(ec::strisutf8(utf8path) ? CP_UTF8 : CP_ACP, 0, utf8path, -1, wpath, sizeof(wpath) / sizeof(wchar_t)))
@@ -155,9 +145,7 @@ namespace ec
 			return 0;
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			bool filestat(const charT* utf8file, t_stat *pout)
+		inline bool filestat(const char* utf8file, t_stat *pout)
 		{
 			wchar_t wfile[512];
 			if (!MultiByteToWideChar(ec::strisutf8(utf8file) ? CP_UTF8 : CP_ACP, 0, utf8file, -1, wfile, sizeof(wfile) / sizeof(wchar_t)))
@@ -173,7 +161,7 @@ namespace ec
 			return false;
 		}
 
-		template<class _Out>
+		template<class _Out = std::string>
 		bool getappname(_Out &utf8name)
 		{
 			wchar_t sFilename[512];
@@ -193,7 +181,7 @@ namespace ec
 			return true;
 		}
 
-		template<class _Out>
+		template<class _Out = std::string>
 		bool getexepath(_Out& utf8path) // last char is '/'
 		{
 			wchar_t sFilename[512];
@@ -223,9 +211,7 @@ namespace ec
 			return true;
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			long long filesize(const charT* utf8file)
+		inline long long filesize(const char* utf8file)
 		{
 			wchar_t wsfile[512];
 			if (!MultiByteToWideChar(ec::strisutf8(utf8file) ? CP_UTF8 : CP_ACP, 0, utf8file, -1, wsfile, sizeof(wsfile) / sizeof(wchar_t)))
@@ -236,20 +222,24 @@ namespace ec
 			return -1;
 		}
 
-		template <class _Out>
+		template <class _Out = std::string>
 		bool lckread(const char* utf8file, _Out *pout, long long offset = 0, long long lsize = 0)
 		{
+			pout->clear();
 			long long size = filesize(utf8file);
 			if (size <= 0) {
-				pout->clear();
 				return false;
 			}
+			if (lsize)
+				pout->reserve((size_t)lsize);
+			else if(size > offset)
+				pout->reserve(static_cast<size_t>(size - offset));
 
 			wchar_t sfile[512];
 			if (!MultiByteToWideChar(ec::strisutf8(utf8file) ? CP_UTF8 : CP_ACP, 0, utf8file, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
 				return false;
 
-			HANDLE hFile = CreateFileW(sfile, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING
+			HANDLE hFile = CreateFileW(sfile, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING
 				, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL); // 共享只读打开
 			if (hFile == INVALID_HANDLE_VALUE)
 				return false;
@@ -269,7 +259,7 @@ namespace ec
 				CloseHandle(hFile);
 				return false;
 			}
-			pout->clear();
+
 			char tmp[1024 * 32];
 			DWORD dwr = 0;
 			if (offset) {
@@ -285,28 +275,24 @@ namespace ec
 					dwr = (DWORD)((size_t)lsize - pout->size());
 				else
 					dwr = (DWORD)sizeof(tmp);
-				if (!ReadFile(hFile, tmp, dwr, &dwr, NULL))
+				if (!ReadFile(hFile, tmp, dwr, &dwr, nullptr))
 					break;
 				pout->append(tmp, dwr);
-			} while (dwr == sizeof(tmp));
+			} while (dwr == sizeof(tmp) && (!lsize || (pout->size() < (size_t)lsize)));
 
 			UnlockFileEx(hFile, 0, dwll, dwlh, &op);
 			CloseHandle(hFile);
 			return pout->size() > 0;
 		}
 #else
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			bool exist(const charT* sfile)
+		inline bool exist(const char* sfile)
 		{
 			if (access(sfile, F_OK))
 				return false;
 			return true;
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			bool createdir(const charT* spath)
+		inline bool createdir(const char* spath)
 		{
 			if (!spath || !*spath)
 				return false;
@@ -338,9 +324,7 @@ namespace ec
 			return true;
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			long long getdiskspace(const charT* sroot) //
+		inline long long getdiskspace(const char* sroot) //
 		{
 			struct statfs diskInfo;
 
@@ -408,9 +392,7 @@ namespace ec
 			return !(fcntl(nfd, F_SETLKW, &lock) < 0);
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			long long filesize(const charT* utf8file)
+		inline long long filesize(const char* utf8file)
 		{
 			struct stat statbuf;
 			if (!::stat(utf8file, &statbuf))
@@ -418,9 +400,7 @@ namespace ec
 			return -1;
 		}
 
-		template<typename charT
-			, class = typename std::enable_if<std::is_same<charT, char>::value>::type>
-			bool filestat(const charT* sfile, t_stat *pout)
+		inline bool filestat(const char* sfile, t_stat *pout)
 		{
 			struct stat statbuf;
 			if (!::stat(sfile, &statbuf)) {
@@ -452,7 +432,7 @@ namespace ec
 		S_IXOTH  00001 others have execute permission
 		*/
 
-		template <class _Out>
+		template <class _Out = std::string>
 		bool lckread(const char* utf8file, _Out *pout, long long offset = 0, long long lsize = 0)
 		{
 			int nfd = ::open(utf8file, O_RDONLY, S_IROTH | S_IRUSR | S_IRGRP);
@@ -465,6 +445,11 @@ namespace ec
 				return false;
 			}
 			pout->clear();
+			if (lsize)
+				pout->reserve((size_t)lsize);
+			else if (size > offset)
+				pout->reserve(static_cast<size_t>(size - offset));
+
 			char tmp[1024 * 32];
 			ssize_t nr;
 			if (!lock(nfd, offset, lsize, false)) {
@@ -482,7 +467,7 @@ namespace ec
 				nr = ::read(nfd, tmp, szr);
 				if (nr > 0)
 					pout->append(tmp, nr);
-			} while (nr == (int)sizeof(tmp));
+			} while (nr == (int)sizeof(tmp) &&(!lsize || (pout->size() < (size_t)lsize)));
 			unlock(nfd, offset, lsize);
 			::close(nfd);
 			return pout->size() > 0;

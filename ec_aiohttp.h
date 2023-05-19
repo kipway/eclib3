@@ -83,7 +83,6 @@ namespace ec {
 					return pPkg->HasKeepAlive();
 				}
 				ec::string vret;
-
 				vret.reserve(1024 * 4);
 				const char* sc = "HTTP/1.1 101 Switching Protocols\x0d\x0a"\
 					"Upgrade: websocket\x0d\x0a"\

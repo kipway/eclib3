@@ -76,7 +76,7 @@ namespace ec {
 			bool httpwrite_401(uint32_t ucid, ec::http::package* pPkg, const char* html = nullptr, size_t htmlsize = 0, const char* stype = nullptr)
 			{
 				ec::bytes vs;
-				vs.reserve(1024 * 4);
+				vs.reserve(1024 * 2);
 				if (!pPkg->make(&vs, 401, "Unauthorized", stype, "WWW-Authenticate: Basic\r\n", html, htmlsize))
 					return false;
 				return this->sendtofd(ucid, vs.data(), vs.size()) >= 0;
@@ -84,7 +84,7 @@ namespace ec {
 			bool httpwrite(int fd, ec::http::package* pPkg, const char* html, size_t size, const char* stype)
 			{
 				ec::bytes vs;
-				vs.reserve(1024 * 32);
+				vs.reserve(1024 + size);
 				ec::str256 content_type;
 				bool bzip = true;
 				if (stype && *stype) {
@@ -100,7 +100,7 @@ namespace ec {
 				if (plog->getlevel() < loglevel)
 					return;
 				ec::string vs;
-				vs.reserve(4096);
+				vs.reserve(2000);
 				for (auto& i : ph->_head) {
 					vs += '\t';
 					vs.append(i._key._s, i._key._size);
@@ -134,12 +134,12 @@ namespace ec {
 					return pPkg->HasKeepAlive();
 				}
 				ec::string answer;
-				answer.reserve(1024 * 4);
+				answer.reserve(4000);
 				answer += "HTTP/1.1 200 ok\r\nServer: eclib web server\r\n";
 				if (pPkg->HasKeepAlive())
 					answer += "Connection: keep-alive\r\n";
 				answer += "Accept-Ranges: bytes\r\n";
-				if (!tmp.printf("Content-Length: %lld\r\n\r\n", flen))
+				if (!tmp.format("Content-Length: %lld\r\n\r\n", flen))
 					return false;
 				answer.append(tmp.data(), tmp.size());
 				if (this->_plog)
@@ -149,7 +149,6 @@ namespace ec {
 			bool downfile(int fd, ec::http::package* pPkg, const char* sfile)
 			{
 				ec::string data;
-				data.reserve(1024 * 32);
 				if (!ec::io::lckread(sfile, &data) || !data.size()) {
 					httpreterr(fd, ec::http_sret404, 404);
 					return pPkg->HasKeepAlive();
@@ -161,7 +160,7 @@ namespace ec {
 			{
 				ec::str1k tmp;
 				ec::string answer;
-				answer.reserve(1024 * 32);
+				answer.reserve(1024 * 30);
 				answer += "HTTP/1.1 206 Partial Content\r\nServer: eclib web server\r\n";
 				if (pPkg->HasKeepAlive())
 					answer += "Connection: keep-alive\r\n";
@@ -176,15 +175,14 @@ namespace ec {
 				else
 					answer += "Content-type: application/octet-stream\r\n";
 				ec::string filetmp;
-				filetmp.reserve(1024 * 32);
 				if (!ec::io::lckread(sfile, &filetmp, lpos, lsize)) {
 					httpreterr(fd, ec::http_sret404, 404);
 					return pPkg->HasKeepAlive();
 				}
-				if (!tmp.printf("Content-Range: bytes %lld-%lld/%lld\r\n", (long long)lpos, (long long)(lpos + filetmp.size() - 1), (long long)lfilesize))
+				if (!tmp.format("Content-Range: bytes %lld-%lld/%lld\r\n", (long long)lpos, (long long)(lpos + filetmp.size() - 1), (long long)lfilesize))
 					return false;
 				answer += tmp.c_str();
-				if (!tmp.printf("Content-Length: %zu\r\n\r\n", filetmp.size()))
+				if (!tmp.format("Content-Length: %zu\r\n\r\n", filetmp.size()))
 					return false;
 				answer += tmp.c_str();
 

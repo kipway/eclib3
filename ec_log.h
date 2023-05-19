@@ -123,14 +123,14 @@ namespace ec
 		{
 			if (!str || !*str)
 				return -1;
-			std::string strurl;
+			ec::string strurl;
 			strurl.reserve(strlen(str) + 1);
 			while (*str) { // remove space and table char
 				if (*str != '\x20' && *str != '\t')
 					strurl.push_back(*str);
 				str++;
 			}
-			ec::net::url purl;
+			ec::net::url<ec::string> purl;
 			if (!purl.parse(strurl.c_str(), strurl.size()))
 				return -1;
 			if (purl._path.empty())

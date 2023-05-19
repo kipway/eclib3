@@ -374,14 +374,14 @@ namespace ec {
 		}
 		
 #ifdef _WIN32
-		bool printf(const char * format, ...) noexcept
+		bool format(const char * sfmt, ...) noexcept
 #else
-		bool printf(const char * format, ...) noexcept __attribute__((format(printf, 2, 3)))
+		bool format(const char * sfmt, ...) noexcept __attribute__((format(printf, 2, 3)))
 #endif
 		{
 			va_list arg_ptr;
-			va_start(arg_ptr, format);
-			int n = vsnprintf(_data, _Num, format, arg_ptr);
+			va_start(arg_ptr, sfmt);
+			int n = vsnprintf(_data, _Num, sfmt, arg_ptr);
 			va_end(arg_ptr);
 			_pos = 0;
 			_size = 0;

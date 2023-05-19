@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update
+  2023.5.18 add get_jstring another version
   2023.2.19 update get_jtime
 
 json
@@ -155,24 +156,6 @@ namespace ec
 			return nullptr;
 		}
 
-		template<class _Str>
-		bool getstr(const txt& key, _Str& sout)
-		{
-			return get_jstring(key, sout);
-		}
-
-		bool getstr(const txt& key, char* sout, size_t outsize)
-		{
-			std::mstring stmp;
-			*sout = 0;
-			if (get_jstring(key, stmp) && stmp.size() < outsize && !stmp.empty()) {
-				memcpy(sout, stmp.c_str(), stmp.size());
-				sout[stmp.size()] = 0;
-				return true;
-			}
-			return false;
-		}
-
 		bool from_str(txt& s, const char* keyend = nullptr)
 		{
 			_kvs.clear();
@@ -193,7 +176,8 @@ namespace ec
 			return from_str(t, keyend);
 		}
 
-		static bool load_file(const char* sfile, std::string& sout)
+		template<class STR_ = std::string>
+		static bool load_file(const char* sfile, STR_& sout)
 		{
 			if (!sfile)
 				return false;
@@ -213,7 +197,8 @@ namespace ec
 			return true;
 		}
 
-		static void del_comment(const char* pin, size_t inlen, std::string& sout)
+		template<class STR_ = std::string>
+		static void del_comment(const char* pin, size_t inlen, STR_& sout)
 		{
 			size_t n = inlen;
 			const char* s = pin, * sp = s;
@@ -236,7 +221,44 @@ namespace ec
 				sout.append(sp, s - sp);
 		}
 
-		template<typename _Str>
+		inline bool fromjstr(const char* s, size_t srcsize, char* sout, size_t sizeout) // delete escape, "\\" -> '\', ""\'" -> '"' and set to sout
+		{
+			if (!sout || !sizeout)
+				return false;
+			if (!s || !srcsize) {
+				*sout = 0;
+				return false;
+			}
+			bool besc = false;
+			for (auto i = 0u; i < srcsize; i++) {
+				if (s[i] == '\\') {
+					besc = true;
+					break;
+				}
+			}
+			if (!besc) {
+				if (sizeout <= srcsize)
+					return false;
+				memcpy(sout, s, srcsize);
+				sout[srcsize] = 0;
+				return true;
+			}
+
+			const char* se = s + srcsize;
+			size_t zn = 0;
+			while (s < se) {
+				if (*s == '\\' && s + 1 < se && (*(s + 1) == '\"' || *(s + 1) == '\\'))
+					s++;
+				sout += *s++;
+				++zn;
+				if (zn >= sizeout)
+					return false;
+			}
+			sout[zn] = 0;
+			return true;
+		}
+
+		template<typename _Str = std::string>
 		void fromjstr(const char* s, size_t srcsize, _Str& sout) // delete escape, "\\" -> '\', ""\'" -> '"' and set to sout
 		{
 			sout.clear();
@@ -253,7 +275,7 @@ namespace ec
 				sout.append(s, srcsize);
 				return;
 			}
-
+			sout.reserve(srcsize);
 			const char* se = s + srcsize;
 			while (s < se) {
 				if (*s == '\\' && s + 1 < se && (*(s + 1) == '\"' || *(s + 1) == '\\'))
@@ -302,6 +324,18 @@ namespace ec
 				return false;
 			fromjstr(pkv->_v._str, pkv->_v._size, val);
 			return true;
+		}
+
+		bool get_jstring(const txt& key, char* sout, size_t outsize)
+		{
+			if (!sout || !outsize)
+				return false;
+			*sout = 0;
+			const ec::json::t_kv* pkv;
+			pkv = getkv(key);
+			if (!pkv)
+				return false;
+			return fromjstr(pkv->_v._str, pkv->_v._size, sout, outsize);
 		}
 
 		template<typename _STR, class ALLOCATOR_ = std::allocator<_STR>>

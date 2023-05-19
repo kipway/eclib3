@@ -71,7 +71,7 @@ namespace ec {
 			virtual int sendasyn(const void* pdata, size_t size, ec::ilog* plog)
 			{
 				bytes tlspkg;
-				tlspkg.reserve(size + 1024 - size % 1024);
+				tlspkg.reserve(size + 88 * (1 + size / TLS_CBCBLKSIZE));
 				if (_tls.MakeAppRecord(&tlspkg, pdata, size))
 					return session::sendasyn(tlspkg.data(), tlspkg.size(), plog);
 				return -1;

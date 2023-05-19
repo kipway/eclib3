@@ -97,14 +97,14 @@ namespace ec {
 		int _nst;
 		int _sizercvbuf;
 		int _sizesndbuf;
-		ec::net::url _url;
+		ec::net::url<ec::string> _url;
 
 	private:
 		SOCKET _fd;
 		pollfd _pollfd;
 		time_t _timeconnect;
 		time_t _timeclose;// for delay reconnect
-		std::string _sname;
+		ec::string _sname;
 	private:
 		ec::blk_alloctor<> _blkallocator;
 		ec::io_buffer<> _sndbuf;

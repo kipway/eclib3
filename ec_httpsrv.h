@@ -168,7 +168,7 @@ namespace ec
 
 					answer += "Accept-Ranges: bytes\r\n";
 
-					if (!tmp.printf("Content-Length: %lld\r\n\r\n", flen))
+					if (!tmp.format("Content-Length: %lld\r\n\r\n", flen))
 						return false;
 					answer.append(tmp.data(), tmp.size());
 					if (_plog)
@@ -186,7 +186,6 @@ namespace ec
 			{
 				try {
 					ec::string data;
-					data.reserve(1024 * 16);
 					if (!ec::io::lckread(sfile, &data) || !data.size()) {
 						httpreterr(ucid, ec::http_sret404, 404);
 						return pPkg->HasKeepAlive();
@@ -223,16 +222,15 @@ namespace ec
 						answer += "Content-type: application/octet-stream\r\n";
 
 					ec::string filetmp;
-					filetmp.reserve(1024 * 16);
 					if (!io::lckread(sfile, &filetmp, lpos, lsize)) {
 						httpreterr(ucid, ec::http_sret404, 404);
 						return pPkg->HasKeepAlive();
 					}
 
-					if (!tmp.printf("Content-Range: bytes %lld-%lld/%lld\r\n", (long long)lpos, (long long)(lpos + filetmp.size() - 1), (long long)lfilesize))
+					if (!tmp.format("Content-Range: bytes %lld-%lld/%lld\r\n", (long long)lpos, (long long)(lpos + filetmp.size() - 1), (long long)lfilesize))
 						return false;
 					answer += tmp.c_str();
-					if (!tmp.printf("Content-Length: %zu\r\n\r\n", filetmp.size()))
+					if (!tmp.format("Content-Length: %zu\r\n\r\n", filetmp.size()))
 						return false;
 					answer += tmp.c_str();
 

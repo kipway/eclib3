@@ -111,6 +111,7 @@ public:
 	}
 	~netio_linux() {
 		ec::vector<int> vepolls;
+		vepolls.reserve(1000);
 		for (auto& i : _mapfd) {
 			if (fd_epoll == i.fdtype)
 				vepolls.push_back(i.sysfd);
@@ -127,7 +128,8 @@ public:
 	inline size_t size() {
 		return _mapfd.size();
 	}
-	bool init(const char* env, std::string& errout)//{"rcvbufsize":256, "sndbufsize":8192}
+	template<class STR_ = std::string>
+	bool init(const char* env, STR_& errout)//{"rcvbufsize":256, "sndbufsize":8192}
 	{
 		if (!env || !*env)
 			return true;
@@ -322,6 +324,7 @@ public:
 
 	void getall(ec::vector<int>& fds)
 	{
+		fds.reserve(_mapfd.size());
 		for (auto& i : _mapfd)
 			fds.push_back(i.kfd);
 	}

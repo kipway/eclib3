@@ -31,11 +31,6 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_array.h"
 #include "ec_alloctor.h"
 #include "ec_string.hpp"
-namespace std
-{
-	using bytes = basic_string<uint8_t, char_traits<uint8_t>, ec::std_allocator<uint8_t>>; // std::bytes
-	using mstring = basic_string<char, char_traits<char>, ec::std_allocator<char>>; //self allocator std::string
-}
 
 #define WIN_CP_GBK  936
 
@@ -139,7 +134,7 @@ namespace ec
 			return !*s1 && i == s2size;
 		return i == s2size;
 	}
-	
+
 	inline void strtrim(char *s, const char* flt = "\x20\t\n\r")
 	{
 		if (!*s)
@@ -455,7 +450,7 @@ namespace ec
 		}
 		return !nb;
 	}
-	
+
 	inline bool strisascii(const char* s, size_t size = 0)
 	{// If s is a pure ASCII code or a utf8 string containing only ASCII, it will return true
 		if (!s)
@@ -521,7 +516,6 @@ namespace ec
 #endif
 	}
 
-	
 	inline int gbk2utf8(const char* in, size_t sizein, char *out, size_t sizeout)
 	{ //return number bytes write to out or -1 error
 		*out = 0;

@@ -130,7 +130,7 @@ namespace ec
 	template<class _Out>
 	bool get_cert_pkey(const char* filecert, _Out* pout)//get ca public key bitstr
 	{
-		std::string cert;
+		ec::string cert;
 		if (!load_certfile(filecert, cert))
 			return false;
 		X509* px509 = nullptr;
@@ -772,7 +772,7 @@ namespace ec
 
 			bool SetServerCa(const char* scafile)
 			{
-				std::string pkey;
+				ec::string pkey;
 				if (!get_cert_pkey(scafile, &pkey))
 					return false;
 				return SetServerPubkey((int)pkey.size(), (const unsigned char*)pkey.data());
@@ -1450,15 +1450,13 @@ namespace ec
 			RSA* _pRsaPub;
 			RSA* _pRsaPrivate;
 
-			std::string _pcer;
-			std::string _prootcer;
+			ec::string _pcer;
+			ec::string _prootcer;
 
 			std::mutex _csRsa;
 		public:
 			srvca() : _pRsaPub(nullptr), _pRsaPrivate(nullptr)
 			{
-				_pcer.reserve(4096);
-				_prootcer.reserve(8192);
 			}
 			void clear() {
 				if (_pRsaPrivate)

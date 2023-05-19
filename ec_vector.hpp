@@ -2,7 +2,7 @@
 \file ec_vector.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.5.15
+\update 2023.5.18
 
 std::vector use ec::std_allocator
 
@@ -18,6 +18,5 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 namespace ec
 {
 	template<typename _Tp>
-	class vector : public std::vector<_Tp, ec::std_allocator<_Tp>> {
-	};
+	struct vector : std::vector<_Tp, ec::std_allocator<_Tp>> {};
 }

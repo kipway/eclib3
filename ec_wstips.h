@@ -157,8 +157,8 @@ namespace ec
 		const uint8_t* pds = (const uint8_t*)pdata;
 		size_t slen = sizes;
 		bytes tmp;
-		tmp.reserve(2048 + sizes - sizes % 1024);
 		if (ncompress && sizes >= 128) {
+			tmp.reserve(1024 + sizes - sizes % 512);
 			if (Z_OK != ws_encode_zlib(pdata, sizes, &tmp) || tmp.size() < 6)
 				return false;
 			pds = tmp.data() + 2;
@@ -166,6 +166,7 @@ namespace ec
 		}
 		size_t ss = 0, us;
 		pout->clear();
+		pout->reserve(slen + ((slen / EC_SIZE_WS_FRAME) + 1) * 40);
 		do {
 			uc = 0;
 			if (0 == ss) { //first frame
@@ -224,6 +225,7 @@ namespace ec
 		unsigned char uc;
 		size_t ss = 0, us, fl;
 		pout->clear();
+		pout->reserve(sizes + 16 * (1 + sizes / EC_SIZE_WS_FRAME));
 		do{
 			uc = 0;
 			us = ((sizes - ss) >= EC_SIZE_WS_FRAME) ? EC_SIZE_WS_FRAME : sizes - ss;

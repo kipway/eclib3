@@ -560,7 +560,7 @@ namespace ec {
 			{
 				t_readflow fl{ 0,0 };
 				ec::vector<t_readflow> fds;
-				fds.reserve(256);
+				fds.reserve(200);
 				psession pss;
 				for (auto& i : _mapfd) {
 					if (i.post_rcv <= 0 && i.fdtype != fd_listen && i.fdtype != fd_iocp && i.fdtype != fd_udp) {
@@ -581,8 +581,8 @@ namespace ec {
 			{
 				ec::vector<int> fdsok;
 				ec::vector<int> fdserr;
-				fdsok.reserve(256);
-				fdserr.reserve(256);
+				fdsok.reserve(32);
+				fdserr.reserve(32);
 				psession pss;
 				for (auto& i : _mapfd) {
 					if (i.fdtype == fd_tcpout) {

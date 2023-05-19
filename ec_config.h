@@ -258,7 +258,7 @@ namespace ec
 			return sout;
 		}
 	} //namespace csv
-
+	/*
 	namespace cfg
 	{
 		template <class rstream, class _Str>
@@ -428,6 +428,178 @@ namespace ec
 			return !fs.available() ? false : scan(&fs, fun, commentchar);
 		}
 	}// namespace cfg
+	*/
+	template<class STR_>
+	class config {
+	public:
+		inline bool iscommentchar(int c, int commentchar = 0) {
+			return ('#' == c || ';' == c) && (0 == commentchar || c == commentchar);
+		}
+		template<class rstream>
+		bool scan(rstream* pf, std::function<int(const STR_& blk, const STR_& key, const STR_& val)>fun, int commentchar = 0)
+		{ // fun return 0: continue; Non-zero: stop scan
+			if (!pf)
+				return false;
+			int c = pf->getc(), c2 = pf->getc(), c3 = pf->getc();
+			if (!(c == 0xef && c2 == 0xbb && c3 == 0xbf)) // not utf8 with bom
+				pf->seek(0, SEEK_SET);
+
+			STR_ blk, key, val;
+			while ((c = pf->getc()) != EOF) {
+				switch (c) {
+				case '#':
+				case ';':
+					if (iscommentchar(c, commentchar)) {
+						while ((c = pf->getc()) != EOF) {
+							if ('\n' == c || '\r' == c)
+								break;
+						}
+						key.clear();
+					}
+					else
+						key += c;
+					break;
+				case  '[':
+					blk.clear();
+					while ((c = pf->getc()) != EOF) {
+						if (']' == c || '\n' == c || '\r' == c) {
+							key.clear();
+							val.clear();
+							if (fun(blk, key, val))
+								return true;
+							break;
+						}
+						blk += c;
+					}
+					break;
+				case '=':
+					val.clear();
+					while ((c = pf->getc()) != EOF) {
+						if (iscommentchar(c, commentchar) || '\n' == c || '\r' == c)
+							break;
+						if (!val.empty() || ('\x20' != c && '\t' != c))// skip pre-spaces
+							val += c;
+					}
+					val.erase(val.find_last_not_of("\x20\t") + 1); // delete last spacess
+					if (fun(blk, key, val))
+						return true;
+					while (EOF != c) {
+						if ('\n' == c)
+							break;
+						c = pf->getc();
+					}
+					key.clear();
+					break;
+				default:
+					if ('\x20' != c && '\t' != c && '\r' != c && '\n' != c)
+						key += c;
+					break;
+				}
+			}
+			return true;
+		}
+
+		inline bool scanstring(const char* str, size_t zlen, std::function<int(const STR_& blk, const STR_& key, const STR_& val)>fun, int commentchar = 0)
+		{
+			rstream_str fs(str, zlen);
+			return !fs.available() ? false : scan(&fs, fun, commentchar);
+		}
+
+		inline bool scanfile(const char* sfile, std::function<int(const STR_& blk, const STR_& key, const STR_& val)>fun, int commentchar = 0)
+		{
+			rstream_file fs(sfile);
+			return !fs.available() ? false : scan(&fs, fun, commentchar);
+		}
+
+		template <class rstream, class _Str>
+		bool setval(rstream* pf,
+			std::function<int(const STR_& blk, const STR_& key, STR_& newv)>fun,
+			_Str& so)
+		{ // fun return Non-zero replace
+			so.clear();
+			so.reserve(1024 * 8);
+			if (!pf)
+				return false;
+			int c = pf->getc(), c2 = pf->getc(), c3 = pf->getc();
+			if (!(c == 0xef && c2 == 0xbb && c3 == 0xbf)) // not utf8 with bom
+				pf->seek(0, SEEK_SET);
+			else {
+				so += c;
+				so += c2;
+				so += c3;
+			}
+			STR_ blk, key, newv;
+			while ((c = pf->getc()) != EOF) {
+				so += c;
+				switch (c) {
+				case '#':
+				case ';':
+					while ((c = pf->getc()) != EOF) {
+						so += c;
+						if ('\n' == c || '\r' == c)
+							break;
+					}
+					key.clear();
+					break;
+				case  '[':
+					blk.clear();
+					while ((c = pf->getc()) != EOF) {
+						so += c;
+						if (']' == c || '\n' == c || '\r' == c)
+							break;
+						blk += c;
+					}
+					break;
+				case '=':
+					newv.clear();
+					if (!key.empty() && fun(blk, key, newv)) {
+						so += newv;
+						while ((c = pf->getc()) != EOF) {
+							if ('#' == c || ';' == c || '\n' == c || '\r' == c)
+								break;
+						}
+					}
+					else
+						so.pop_back();
+					while (EOF != c) {
+						so += c;
+						if ('\n' == c || '\r' == c)
+							break;
+						c = pf->getc();
+					}
+					key.clear();
+					break;
+				default:
+					if ('\x20' != c && '\t' != c && '\r' != c && '\n' != c)
+						key += c;
+					break;
+				}
+			}
+			return true;
+		}
+
+		template <class _Str>
+		bool setval(const char* sfile,
+			std::function<int(const STR_& blk, const STR_& key, STR_& newv)>fun,
+			_Str& so)
+		{
+			rstream_file fs(sfile);
+			if (!fs.available())
+				return false;
+			return setval(&fs, fun, so);
+		}
+
+		template <class _Str>
+		bool setval(const _Str& instr,
+			std::function<int(const STR_& blk, const STR_& key, STR_& newv)>fun,
+			_Str& so)
+		{
+			rstream_str fs(instr.data(), instr.size());
+			if (!fs.available())
+				return false;
+			return setval(&fs, fun, so);
+		}
+	};
 }; // ec
 
 /*

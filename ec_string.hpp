@@ -2,7 +2,7 @@
 \file ec_string.hpp
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.5.15
+\update 2023.5.18
 2023.5.13 use ec_malloc
 
 ec basic string
@@ -28,8 +28,8 @@ namespace ec
 				zr += 16u - zr % 16u;
 			if (zr + zr / 2u < UINT32_MAX / 2u - 1024u)
 				zr += zr / 2u; // 1.5x size
-			if (zr < 64u)
-				zr = 64u;
+			if (zr < 32u)
+				zr = 32u;
 			if (poutsize)
 				*poutsize = zr;
 			return ::realloc(ptr, zr);
@@ -399,7 +399,18 @@ namespace ec
 		{
 			return _pstr[size() - 1];
 		}
-		void resize(size_t n, char c = 0) noexcept
+		void resize(size_t n) noexcept
+		{
+			size_t zlen = size();
+			if (n < zlen)
+				setsize_(_pstr, n);
+			else if (n > zlen) {
+				if (recapacity(n)) {
+					setsize_(_pstr, n);
+				}
+			}
+		}
+		void resize(size_t n, value_type c) noexcept
 		{
 			size_t zlen = size();
 			if (n < zlen)
@@ -411,6 +422,32 @@ namespace ec
 				}
 			}
 		}
+		string_& insert(size_t pos, size_t n, value_type c)
+		{
+			if (!n)
+				return *this;
+			size_t zlen = size();
+			if (pos >= zlen)
+				return append(c);
+			if (zlen + n > capacity()) {
+				pointer pnewstr = srealloc(zlen + n);
+				if (!pnewstr)
+					return *this;
+				_pstr = pnewstr;
+			}
+			memmove(_pstr + pos + n, _pstr + pos, zlen - pos);
+			if (1 == n) {
+				*(_pstr + pos) = c;
+			}
+			else {
+				pointer p = _pstr + pos, pend = _pstr + pos + n;
+				while (p < pend)
+					*p++ = c;
+			}
+			setsize_(_pstr, zlen + n);
+			return *this;
+		}
+
 		string_& insert(size_t pos, const_pointer s, size_t n) noexcept
 		{
 			if (!s || !*s || !n)
@@ -561,7 +598,6 @@ namespace ec
 				return -1;
 			return pt - (const char*)data();
 		}
-
 		size_t find_first_of(char c, size_t pos = 0) const noexcept
 		{
 			if (pos >= size())
@@ -571,7 +607,203 @@ namespace ec
 				return -1;
 			return pt - (const char*)data();
 		}
+		size_t find_last_not_of(const char* s, size_t pos = npos) const noexcept
+		{
+			if (pos == npos)
+				pos = size();
+			while (pos > 0) {
+				if (!strchr(s, _pstr[pos - 1]))
+					break;
+				--pos;
+			};
+			return pos - 1;
+		}
 	}; // string_
+
 	using string = string_<ec_string_alloctor>;
 	using bytes = string_<ec_string_alloctor, uint32_t, uint8_t>;
+	
+	inline string to_string(int _Val)
+	{
+		string str;
+		str.format("%d", _Val);
+		return str;
+	}
+
+	inline string to_string(unsigned int _Val)
+	{
+		string str;
+		str.format("%u", _Val);
+		return str;
+	}
+
+	inline string to_string(long _Val)
+	{
+		string str;
+		str.format("%ld", _Val);
+		return str;
+	}
+
+	inline string to_string(unsigned long _Val)
+	{
+		string str;
+		str.format("%lu", _Val);
+		return str;
+	}
+
+	inline string to_string(long long _Val)
+	{
+		string str;
+		str.format("%lld", _Val);
+		return str;
+	}
+
+	inline string to_string(unsigned long long _Val)
+	{
+		string str;
+		str.format("%llu", _Val);
+		return str;
+	}
+
+	inline string to_string(float _Val)
+	{
+		string str;
+		str.format("%f", _Val);
+		return str;
+	}
+
+	inline string to_string(double _Val)
+	{
+		string str;
+		str.format("%f", _Val);
+		return str;
+	}
+
+	inline string to_string(long double _Val)
+	{
+		string str;
+		str.format("%Lf", _Val);
+		return str;
+	}
+
+	template<class _Alo, typename _SizeType, typename _Elem>
+	inline string_<_Alo, _SizeType, _Elem> operator+(
+		const string_<_Alo, _SizeType, _Elem>& _Left,
+		const string_<_Alo, _SizeType, _Elem>& _Right)
+	{ // return string  + string 
+		string_<_Alo, _SizeType, _Elem>  _Ans;
+		_Ans.reserve(_Left.size() + _Right.size());
+		_Ans += _Left;
+		_Ans += _Right;
+		return (_Ans);
+	}
+
+	template<class _Alo, typename _SizeType, typename _Elem>
+	inline string_<_Alo, _SizeType, _Elem>  operator+(
+		const char* _Left,
+		const string_<_Alo, _SizeType, _Elem>& _Right)
+	{ // return const char * + string
+		string_<_Alo, _SizeType, _Elem> _Ans;
+		_Ans.reserve(strlen(_Left) + _Right.size());
+		_Ans += _Left;
+		_Ans += _Right;
+		return (_Ans);
+	}
+
+	template<class _Alo, typename _SizeType, typename _Elem>
+	inline string_<_Alo, _SizeType, _Elem> operator+(
+		const _Elem _Left,
+		const string_<_Alo, _SizeType, _Elem>& _Right)
+	{ // return char + string
+		string_<_Alo, _SizeType, _Elem> _Ans;
+		_Ans.reserve(1 + _Right.size());
+		_Ans += _Left;
+		_Ans += _Right;
+		return (_Ans);
+	}
+
+	template<class _Alo, typename _SizeType, typename _Elem>
+	inline string_<_Alo, _SizeType, _Elem>  operator+(
+		const string_<_Alo, _SizeType, _Elem>& _Left,
+		const char* _Right)
+	{ // return string + const char* s
+		string_<_Alo, _SizeType, _Elem> _Ans;
+		_Ans.reserve(_Left.size() + strlen(_Right));
+		_Ans += _Left;
+		_Ans += _Right;
+		return (_Ans);
+	}
+
+	template<class _Alo, typename _SizeType, typename _Elem>
+	inline string_<_Alo, _SizeType, _Elem>  operator+(
+		const string_<_Alo, _SizeType, _Elem>& _Left,
+		const _Elem _Right)
+	{	// return string + character
+		string_<_Alo, _SizeType, _Elem> _Ans;
+		_Ans.reserve(_Left.size() + 1);
+		_Ans += _Left;
+		_Ans += _Right;
+		return (_Ans);
+	}
+
+	template<class _Alo, typename _SizeType, typename _Elem>
+	inline string_<_Alo, _SizeType, _Elem> operator+(
+		const string_<_Alo, _SizeType, _Elem>& _Left,
+		string_<_Alo, _SizeType, _Elem>&& _Right)
+	{	// return string + string
+		return (std::move(_Right.insert(0, _Left)));
+	}
+
+	template<class _Alo, typename _SizeType, typename _Elem>
+	inline string_<_Alo, _SizeType, _Elem>  operator+(
+		string_<_Alo, _SizeType, _Elem>&& _Left,
+		const string_<_Alo, _SizeType, _Elem>& _Right)
+	{	// return string + string
+		return (std::move(_Left.append(_Right)));
+	}
+
+	template<class _Alo, typename _SizeType, typename _Elem>
+	inline string_<_Alo, _SizeType, _Elem> operator+(
+		string_<_Alo, _SizeType, _Elem>&& _Left,
+		string_<_Alo, _SizeType, _Elem>&& _Right)
+	{	// return string + string
+		if (_Right.size() <= _Left.capacity() - _Left.size()
+			|| _Right.capacity() - _Right.size() < _Left.size())
+			return (std::move(_Left.append(_Right)));
+		else
+			return (std::move(_Right.insert(0, _Left)));
+	}
+
+	template<class _Alo, typename _SizeType, typename _Elem>
+	inline string_<_Alo, _SizeType, _Elem> operator+(
+		const char* _Left,
+		string_<_Alo, _SizeType, _Elem>&& _Right)
+	{	// return const char* + string
+		return (std::move(_Right.insert(0, _Left)));
+	}
+
+	template<class _Alo, typename _SizeType, typename _Elem>
+	inline string_<_Alo, _SizeType, _Elem> operator+(
+		const _Elem _Left,
+		string_<_Alo, _SizeType, _Elem>&& _Right)
+	{	// return character + string
+		return (std::move(_Right.insert(0, 1, _Left)));
+	}
+
+	template<class _Alo, typename _SizeType, typename _Elem>
+	inline string_<_Alo, _SizeType, _Elem> operator+(
+		string_<_Alo, _SizeType, _Elem>&& _Left,
+		const char* _Right)
+	{	// return string + const char*
+		return (std::move(_Left.append(_Right)));
+	}
+
+	template<class _Alo, typename _SizeType, typename _Elem>
+	inline string_<_Alo, _SizeType, _Elem> operator+(
+		string_<_Alo, _SizeType, _Elem>&& _Left,
+		const _Elem _Right)
+	{	// return string + character
+		_Left.push_back(_Right);
+		return (std::move(_Left));
+	}
 }// namespace ec

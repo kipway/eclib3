@@ -452,13 +452,16 @@ namespace ec
 				return sip;
 			}
 
-			bool getpeerurl(uint32_t ucid, std::string &sout)
+			template<class STR_ = std::string>
+			bool getpeerurl(uint32_t ucid, STR_& sout)
 			{
 				PNETSS pi = nullptr;
 				if (!_map.get(ucid, pi))
 					return false;
 				sout = pi->_ip;
-				sout.append(":").append(std::to_string(pi->_peerport));
+				char sport[32];
+				sprintf(sport, ":%u", pi->_peerport);
+				sout.append(sport);
 				return true;
 			}
 
