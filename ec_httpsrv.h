@@ -3,7 +3,8 @@
 
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.5.13
+\update 2020.5.20
+2023.5.20 update http range
 2023.5.13 remove ec::memory
 httpsrv
 	class for http/https server
@@ -25,12 +26,25 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_http.h"
 
 #ifndef MAXSIZE_HTTP_DOWNFILE
-#ifdef _MEM_TINY
+#if defined(_MEM_TINY) // < 256M
 #define MAXSIZE_HTTP_DOWNFILE (2 * 1024 * 1024)
+#elif defined(_MEM_SML) // < 1G
+#define MAXSIZE_HTTP_DOWNFILE (8 * 1024 * 1024)
 #else
-#define MAXSIZE_HTTP_DOWNFILE (32 * 1024 * 1024)
+#define MAXSIZE_HTTP_DOWNFILE (16 * 1024 * 1024)
 #endif
 #endif
+
+#ifndef HTTP_RANGE_SIZE
+#if defined(_MEM_TINY) // < 256M
+#define HTTP_RANGE_SIZE (1024 * 30)
+#elif defined(_MEM_SML) // < 1G
+#define HTTP_RANGE_SIZE (1024 * 60)
+#else
+#define HTTP_RANGE_SIZE (1024 * 120)
+#endif
+#endif
+
 namespace ec
 {
 	namespace net
@@ -118,20 +132,16 @@ namespace ec
 			{
 				if (plog->getlevel() < loglevel)
 					return;
-				try {
-					ec::string vs;
-					vs.reserve(4096);
-					for (auto &i : ph->_head) {
-						vs += '\t';
-						vs.append(i._key._s, i._key._size);
-						vs += ':';
-						vs.append(i._val._s, i._val._size);
-						vs += '\n';
-					}
-					plog->add(loglevel, "%s\n%s", sinfo, vs.c_str());
+				ec::string vs;
+				vs.reserve(2000);
+				for (auto& i : ph->_head) {
+					vs += '\t';
+					vs.append(i._key._s, i._key._size);
+					vs += ':';
+					vs.append(i._val._s, i._val._size);
+					vs += '\n';
 				}
-				catch (...) {
-				}
+				plog->add(loglevel, "%s\n%s", sinfo, vs.c_str());
 			}
 
 			bool parserange(const char* stxt, size_t txtlen, int64_t &lpos, int64_t &lsize)
@@ -146,104 +156,91 @@ namespace ec
 				if (!strnext(',', stxt, txtlen, pos, ssize, sizeof(ssize)))
 					lsize = 0;
 				else
-					lsize = atoll(ssize);
+					lsize = atoll(ssize) - lpos;
+				if (lsize <= 0)
+					lsize = HTTP_RANGE_SIZE;
+				else if (lsize > HTTP_RANGE_SIZE * 8)
+					lsize = HTTP_RANGE_SIZE * 8;
 				return true;
 			}
 
 			bool DoHead(uint32_t ucid, const char* sfile, http::package* pPkg)
 			{
-				try {
-					str1k tmp;
-					long long flen = ec::io::filesize(sfile);
-					if (flen < 0) {
-						httpreterr(ucid, http_sret404, 404);
-						return pPkg->HasKeepAlive();
-					}
-					ec::string answer;
-					answer.reserve(1024 * 4);
-
-					answer += "HTTP/1.1 200 ok\r\nServer: eclib web server\r\n";
-					if (pPkg->HasKeepAlive())
-						answer += "Connection: keep-alive\r\n";
-
-					answer += "Accept-Ranges: bytes\r\n";
-
-					if (!tmp.format("Content-Length: %lld\r\n\r\n", flen))
-						return false;
-					answer.append(tmp.data(), tmp.size());
-					if (_plog)
-						_plog->add(CLOG_DEFAULT_DBG, "http head write ucid(%u) size %zu :\n%s", ucid, answer.size(), answer.c_str());
-					return sendbyucid(ucid, answer.data(), answer.size()) >= 0;
+				str1k tmp;
+				long long flen = ec::io::filesize(sfile);
+				if (flen < 0) {
+					httpreterr(ucid, http_sret404, 404);
+					return pPkg->HasKeepAlive();
 				}
-				catch (...) {
-					if (_plog)
-						_plog->add(CLOG_DEFAULT_ERR, "ucid(%u) head file %s exception", ucid, sfile);
+				ec::string answer;
+				answer.reserve(1024 * 4);
+
+				answer += "HTTP/1.1 200 ok\r\nServer: eclib web server\r\n";
+				if (pPkg->HasKeepAlive())
+					answer += "Connection: keep-alive\r\n";
+
+				answer += "Accept-Ranges: bytes\r\n";
+
+				if (!tmp.format("Content-Length: %lld\r\n\r\n", flen))
 					return false;
-				}
+				answer.append(tmp.data(), tmp.size());
+				if (_plog)
+					_plog->add(CLOG_DEFAULT_DBG, "http head write ucid(%u) size %zu :\n%s", ucid, answer.size(), answer.c_str());
+				return sendbyucid(ucid, answer.data(), answer.size()) >= 0;
 			}
 
 			bool downfile(uint32_t ucid, http::package* pPkg, const char* sfile)
 			{
-				try {
-					ec::string data;
-					if (!ec::io::lckread(sfile, &data) || !data.size()) {
-						httpreterr(ucid, ec::http_sret404, 404);
-						return pPkg->HasKeepAlive();
-					}
-					const char* sext = ec::http::file_extname(sfile);
-					return httpwrite(ucid, pPkg, data.data(), data.size(), sext);
+				ec::string data;
+				if (!ec::io::lckread(sfile, &data) || !data.size()) {
+					httpreterr(ucid, ec::http_sret404, 404);
+					return pPkg->HasKeepAlive();
 				}
-				catch (...) {
-					if (_plog)
-						_plog->add(CLOG_DEFAULT_ERR, "ucid(%u) download file %s exception", ucid, sfile);
-					return false;
-				}
+				const char* sext = ec::http::file_extname(sfile);
+				return httpwrite(ucid, pPkg, data.data(), data.size(), sext);
 			}
 
 			bool DoGetRang(uint32_t ucid, const char* sfile, ec::http::package* pPkg, int64_t lpos, int64_t lsize, int64_t lfilesize)
 			{
-				try {
-					str1k tmp;
-					ec::string answer;
-					answer.reserve(1024 * 16);
-
-					answer += "HTTP/1.1 206 Partial Content\r\nServer: eclib web server\r\n";
+				str1k tmp;
+				ec::string answer;
+				if (lpos >= lfilesize) {
+					answer.reserve(512);
+					answer += "HTTP/1.1 416 Range Not Satisfiable\r\nServer: eclib web server\r\n";
 					if (pPkg->HasKeepAlive())
 						answer += "Connection: keep-alive\r\n";
-					answer += "Accept-Ranges: bytes\r\n";
-
-					const char* sext = http::file_extname(sfile);
-					if (sext && *sext && _pmine->getmime(sext, tmp)) {
-						answer += "Content-type: ";
-						answer += tmp.c_str();
-						answer += "\r\n";
-					}
-					else
-						answer += "Content-type: application/octet-stream\r\n";
-
-					ec::string filetmp;
-					if (!io::lckread(sfile, &filetmp, lpos, lsize)) {
-						httpreterr(ucid, ec::http_sret404, 404);
-						return pPkg->HasKeepAlive();
-					}
-
-					if (!tmp.format("Content-Range: bytes %lld-%lld/%lld\r\n", (long long)lpos, (long long)(lpos + filetmp.size() - 1), (long long)lfilesize))
-						return false;
-					answer += tmp.c_str();
-					if (!tmp.format("Content-Length: %zu\r\n\r\n", filetmp.size()))
-						return false;
-					answer += tmp.c_str();
-
-					answer.append(filetmp.data(), filetmp.size());
-					if (_plog)
-						_plog->add(CLOG_DEFAULT_DBG, "http write rang rang %lld-%lld/%lld", (long long)lpos, (long long)(lpos + filetmp.size() - 1), (long long)lfilesize);
+					tmp.format("Content-Range: bytes */%jd\r\n\r\n", lfilesize);
+					answer.append(tmp);
 					return sendbyucid(ucid, answer.data(), answer.size()) >= 0;
 				}
-				catch (...) {
-					if (_plog)
-						_plog->add(CLOG_DEFAULT_ERR, "ucid(%u) DoGetRang file %s pos= %lld,size=%lld exception", ucid, sfile, (long long)lpos, (long long)lsize);
-					return false;
+				int64_t sizeContent = (lpos + lsize <= lfilesize) ? lsize : lfilesize - lpos;
+				answer.reserve((size_t)sizeContent + 512);
+				answer += "HTTP/1.1 206 Partial Content\r\nServer: eclib web server\r\n";
+				if (pPkg->HasKeepAlive())
+					answer += "Connection: keep-alive\r\n";
+				answer += "Accept-Ranges: bytes\r\n";
+				const char* sext = http::file_extname(sfile);
+				if (sext && *sext && _pmine->getmime(sext, tmp)) {
+					answer += "Content-type: ";
+					answer += tmp;
+					answer += "\r\n";
 				}
+				else
+					answer += "Content-type: application/octet-stream\r\n";
+				if (!tmp.format("Content-Range: bytes %jd-%jd/%jd\r\n", lpos, (lpos + sizeContent - 1), lfilesize))
+					return false;
+				answer.append(tmp);
+				if (!tmp.format("Content-Length: %jd\r\n\r\n", sizeContent))
+					return false;
+				answer += tmp;
+				if (!io::lckread(sfile, &answer, lpos, lsize, lfilesize)) {
+					httpreterr(ucid, ec::http_sret404, 404);
+					return pPkg->HasKeepAlive();
+				}
+				if (_plog)
+					_plog->add(CLOG_DEFAULT_DBG, "http write Content-Length=%jd ucid(%u) rang %jd-%jd/%jd", sizeContent, ucid,
+						lpos, (lpos + sizeContent - 1), lfilesize);
+				return sendbyucid(ucid, answer.data(), answer.size()) >= 0;
 			}
 
 			void loghttpstartline(int nlevel, uint32_t ucid, const char* s, size_t size) //output http start line to log
@@ -264,7 +261,7 @@ namespace ec
 					return false;
 
 				loghttpstartline(CLOG_DEFAULT_DBG, ucid, (const char*)pkg, pkgsize);
-
+				loghttphead(CLOG_DEFAULT_ALL, "head", _plog, &http);
 				if (!http.ismethod("GET") && !http.ismethod("HEAD")) { // only support GET
 					httpreterr(ucid, ec::http_sret400, 400);
 					return http.HasKeepAlive();
@@ -313,12 +310,9 @@ namespace ec
 						return http.HasKeepAlive();
 					}
 				}
-				if (rangsize > MAXSIZE_HTTP_DOWNFILE)
-					rangsize = MAXSIZE_HTTP_DOWNFILE;
 				if (!rangpos && !rangsize) { // get all
-					if (flen > MAXSIZE_HTTP_DOWNFILE) {
-						httpreterr(ucid, ec::http_sret413, 413);
-						return http.HasKeepAlive();
+					if (flen > MAXSIZE_HTTP_DOWNFILE) { // force range
+						return DoGetRang(ucid, sfile.c_str(), &http, rangpos, HTTP_RANGE_SIZE, flen);
 					}
 					return downfile(ucid, &http, sfile.c_str());
 				}

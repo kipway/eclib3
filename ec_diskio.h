@@ -222,18 +222,16 @@ namespace ec
 			return -1;
 		}
 
-		template <class _Out = std::string>
-		bool lckread(const char* utf8file, _Out *pout, long long offset = 0, long long lsize = 0)
+		template <class _Out = std::string> // append _Out
+		bool lckread(const char* utf8file, _Out *pout, long long offset = 0, long long lsize = 0, long long filelen = 0)
 		{
-			pout->clear();
-			long long size = filesize(utf8file);
-			if (size <= 0) {
+			long long fsize = filelen == 0 ? filesize(utf8file) : filelen;
+			if (fsize <= 0 || offset >= fsize)
 				return false;
-			}
 			if (lsize)
-				pout->reserve((size_t)lsize);
-			else if(size > offset)
-				pout->reserve(static_cast<size_t>(size - offset));
+				pout->reserve(pout->size() + (size_t)lsize + 8);
+			else if(fsize > offset)
+				pout->reserve(pout->size() + static_cast<size_t>(fsize - offset) + 8);
 
 			wchar_t sfile[512];
 			if (!MultiByteToWideChar(ec::strisutf8(utf8file) ? CP_UTF8 : CP_ACP, 0, utf8file, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
@@ -270,19 +268,21 @@ namespace ec
 					if (::GetLastError() != NO_ERROR)
 						return false;
 			}
+			size_t zread = 0;
 			do {
-				if (lsize && pout->size() + sizeof(tmp) > (size_t)lsize)
-					dwr = (DWORD)((size_t)lsize - pout->size());
+				if (lsize && zread + sizeof(tmp) > (size_t)lsize)
+					dwr = (DWORD)((size_t)lsize - zread);
 				else
 					dwr = (DWORD)sizeof(tmp);
 				if (!ReadFile(hFile, tmp, dwr, &dwr, nullptr))
 					break;
 				pout->append(tmp, dwr);
-			} while (dwr == sizeof(tmp) && (!lsize || (pout->size() < (size_t)lsize)));
+				zread += dwr;
+			} while (dwr == sizeof(tmp) && (!lsize || (zread < (size_t)lsize)));
 
 			UnlockFileEx(hFile, 0, dwll, dwlh, &op);
 			CloseHandle(hFile);
-			return pout->size() > 0;
+			return zread > 0;
 		}
 #else
 		inline bool exist(const char* sfile)
@@ -324,7 +324,7 @@ namespace ec
 			return true;
 		}
 
-		inline long long getdiskspace(const char* sroot) //
+		inline long long getdiskspace(const char* sroot)
 		{
 			struct statfs diskInfo;
 
@@ -432,23 +432,20 @@ namespace ec
 		S_IXOTH  00001 others have execute permission
 		*/
 
-		template <class _Out = std::string>
-		bool lckread(const char* utf8file, _Out *pout, long long offset = 0, long long lsize = 0)
+		template <class _Out = std::string> //append _Out
+		bool lckread(const char* utf8file, _Out *pout, long long offset = 0, long long lsize = 0, long long filelen = 0)
 		{
+			long long fsize = filelen == 0 ? filesize(utf8file) : filelen;
+			if (fsize <= 0 || offset >= fsize)
+				return false;
+			if (lsize)
+				pout->reserve(pout->size() + (size_t)lsize + 8);
+			else if (fsize > offset)
+				pout->reserve(pout->size() + static_cast<size_t>(fsize - offset) + 8);
+
 			int nfd = ::open(utf8file, O_RDONLY, S_IROTH | S_IRUSR | S_IRGRP);
 			if (nfd == -1)
 				return false;
-			long long  size = filesize(utf8file);
-			if (size <= 0) {
-				::close(nfd);
-				pout->clear();
-				return false;
-			}
-			pout->clear();
-			if (lsize)
-				pout->reserve((size_t)lsize);
-			else if (size > offset)
-				pout->reserve(static_cast<size_t>(size - offset));
 
 			char tmp[1024 * 32];
 			ssize_t nr;
@@ -458,19 +455,21 @@ namespace ec
 			}
 			if (offset)
 				::lseek64(nfd, offset, 0);
-			size_t szr;
+			size_t szr, zread = 0;
 			do {
-				if (lsize && pout->size() + sizeof(tmp) > (size_t)lsize)
-					szr = ((size_t)lsize - pout->size());
+				if (lsize && zread + sizeof(tmp) > (size_t)lsize)
+					szr = ((size_t)lsize - zread);
 				else
 					szr = sizeof(tmp);
 				nr = ::read(nfd, tmp, szr);
-				if (nr > 0)
+				if (nr > 0) {
 					pout->append(tmp, nr);
-			} while (nr == (int)sizeof(tmp) &&(!lsize || (pout->size() < (size_t)lsize)));
+					zread += nr;
+				}
+			} while (nr == (ssize_t)sizeof(tmp) && (!lsize || (zread < (size_t)lsize)));
 			unlock(nfd, offset, lsize);
 			::close(nfd);
-			return pout->size() > 0;
+			return zread > 0;
 		}
 #endif
 	}// namespace io

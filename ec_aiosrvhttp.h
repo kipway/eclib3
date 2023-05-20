@@ -12,10 +12,22 @@ http/ws server
 #include "ec_diskio.h"
 
 #ifndef MAXSIZE_AIOHTTP_DOWNFILE
-#ifdef _ARM_LINUX
+#if defined(_MEM_TINY) // < 256M
 #define MAXSIZE_AIOHTTP_DOWNFILE (2 * 1024 * 1024)
+#elif defined(_MEM_SML) // < 1G
+#define MAXSIZE_AIOHTTP_DOWNFILE (4 * 1024 * 1024)
 #else
-#define MAXSIZE_AIOHTTP_DOWNFILE (32 * 1024 * 1024)
+#define MAXSIZE_AIOHTTP_DOWNFILE (16 * 1024 * 1024)
+#endif
+#endif
+
+#ifndef HTTP_RANGE_SIZE
+#if defined(_MEM_TINY) // < 256M
+#define HTTP_RANGE_SIZE (1024 * 30)
+#elif defined(_MEM_SML) // < 1G
+#define HTTP_RANGE_SIZE (1024 * 60)
+#else
+#define HTTP_RANGE_SIZE (1024 * 120)
 #endif
 #endif
 
@@ -122,7 +134,11 @@ namespace ec {
 				if (!ec::strnext(',', stxt, txtlen, pos, ssize, sizeof(ssize)))
 					lsize = 0;
 				else
-					lsize = atoll(ssize);
+					lsize = atoll(ssize) - lpos;
+				if (lsize <= 0)
+					lsize = HTTP_RANGE_SIZE;
+				else if (lsize > HTTP_RANGE_SIZE * 8)
+					lsize = HTTP_RANGE_SIZE * 8;
 				return true;
 			}
 			bool DoHead(int fd, const char* sfile, ec::http::package* pPkg)
@@ -158,38 +174,45 @@ namespace ec {
 			}
 			bool DoGetRang(int fd, const char* sfile, ec::http::package* pPkg, int64_t lpos, int64_t lsize, int64_t lfilesize)
 			{
-				ec::str1k tmp;
+				str1k tmp;
 				ec::string answer;
-				answer.reserve(1024 * 30);
+				if (lpos >= lfilesize) {
+					answer.reserve(512);
+					answer += "HTTP/1.1 416 Range Not Satisfiable\r\nServer: eclib web server\r\n";
+					if (pPkg->HasKeepAlive())
+						answer += "Connection: keep-alive\r\n";
+					tmp.format("Content-Range: bytes */%jd\r\n\r\n", lfilesize);
+					answer.append(tmp);
+					return sendtofd(fd, answer.data(), answer.size()) >= 0;
+				}
+				int64_t sizeContent = (lpos + lsize <= lfilesize) ? lsize : lfilesize - lpos;
+				answer.reserve((size_t)sizeContent + 512);
 				answer += "HTTP/1.1 206 Partial Content\r\nServer: eclib web server\r\n";
 				if (pPkg->HasKeepAlive())
 					answer += "Connection: keep-alive\r\n";
 				answer += "Accept-Ranges: bytes\r\n";
-
-				const char* sext = ec::http::file_extname(sfile);
+				const char* sext = http::file_extname(sfile);
 				if (sext && *sext && _pmine->getmime(sext, tmp)) {
 					answer += "Content-type: ";
-					answer += tmp.c_str();
+					answer += tmp;
 					answer += "\r\n";
 				}
 				else
 					answer += "Content-type: application/octet-stream\r\n";
-				ec::string filetmp;
-				if (!ec::io::lckread(sfile, &filetmp, lpos, lsize)) {
+				if (!tmp.format("Content-Range: bytes %jd-%jd/%jd\r\n", lpos, (lpos + sizeContent - 1), lfilesize))
+					return false;
+				answer.append(tmp);
+				if (!tmp.format("Content-Length: %jd\r\n\r\n", sizeContent))
+					return false;
+				answer += tmp;
+				if (!io::lckread(sfile, &answer, lpos, lsize, lfilesize)) {
 					httpreterr(fd, ec::http_sret404, 404);
 					return pPkg->HasKeepAlive();
 				}
-				if (!tmp.format("Content-Range: bytes %lld-%lld/%lld\r\n", (long long)lpos, (long long)(lpos + filetmp.size() - 1), (long long)lfilesize))
-					return false;
-				answer += tmp.c_str();
-				if (!tmp.format("Content-Length: %zu\r\n\r\n", filetmp.size()))
-					return false;
-				answer += tmp.c_str();
-
-				answer.append(filetmp.data(), filetmp.size());
-				if (this->_plog)
-					this->_plog->add(CLOG_DEFAULT_DBG, "http write rang rang %lld-%lld/%lld", (long long)lpos, (long long)(lpos + filetmp.size() - 1), (long long)lfilesize);
-				return this->sendtofd(fd, answer.data(), answer.size()) >= 0;
+				if (_plog)
+					_plog->add(CLOG_DEFAULT_DBG, "http write Content-Length=%jd fd(%d) rang %jd-%jd/%jd", sizeContent, fd,
+						lpos, (lpos + sizeContent - 1), lfilesize);
+				return sendtofd(fd, answer.data(), answer.size()) >= 0;
 			}
 			bool dohttp(int fd, const uint8_t* pkg, size_t pkgsize)
 			{
@@ -197,6 +220,7 @@ namespace ec {
 				if (http.parse(((const char*)pkg), pkgsize) <= 0)
 					return false;
 				loghttpstartline(CLOG_DEFAULT_DBG, fd, (const char*)pkg, pkgsize);
+				loghttphead(CLOG_DEFAULT_ALL, "head", _plog, &http);
 				if (!http.ismethod("GET") && !http.ismethod("HEAD")) { // only support GET
 					httpreterr(fd, ec::http_sret400, 400);
 					return http.HasKeepAlive();
@@ -239,12 +263,9 @@ namespace ec {
 						return http.HasKeepAlive();
 					}
 				}
-				if (rangsize > MAXSIZE_AIOHTTP_DOWNFILE)
-					rangsize = MAXSIZE_AIOHTTP_DOWNFILE;
 				if (!rangpos && !rangsize) { // get all
-					if (flen > MAXSIZE_AIOHTTP_DOWNFILE) {
-						httpreterr(fd, ec::http_sret413, 413);
-						return http.HasKeepAlive();
+					if (flen > MAXSIZE_AIOHTTP_DOWNFILE) { // force range
+						return DoGetRang(fd, sfile.c_str(), &http, rangpos, HTTP_RANGE_SIZE, flen);
 					}
 					return downfile(fd, &http, sfile.c_str());
 				}
