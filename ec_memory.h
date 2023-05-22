@@ -2,14 +2,15 @@
 \file ec_memory.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023/5/13 autobuf remove ec::memory
-\update 2023.5.8 add ec::memory::maxblksize()
-\update 2023.3.1 update io_buffer::append
-\update 2022.10.10 update autobuf, mark mem_sets, block_allocator, cycle_fifo deprecated
-\update 2022.10.8 update parsebuffer
-\update 2022.7.24 add parsebuffer
-\update 2022.7.20 add io_buffer
-
+\update 
+  2023-5-21 update io_buffer
+  2023-5-13 autobuf remove ec::memory
+  2023-5-8 add ec::memory::maxblksize()
+  2023-3-1 update io_buffer::append
+  2022-10-10 update autobuf, mark mem_sets, block_allocator, cycle_fifo deprecated
+  2022-10-8 update parsebuffer
+  2022-7-24 add parsebuffer
+  2022-7-20 add io_buffer
 
 autobuf
 	buffer class auto free memory
@@ -113,23 +114,19 @@ namespace ec {
 	template<class BLK_ALLOCTOR = blk_alloctor<>> //BLK_ALLOCTOR default not thread safe
 	class io_buffer // net IO bytes buffer,用于发送缓冲
 	{
-	private:
+	public:
 		struct blk_ {
 			uint32_t pos; // read position
 			uint32_t len; // append position
 			blk_* pnext; //next block
 			blk_() :pos(0), len(0), pnext(nullptr) {}
 		};
-
+	private:
 		BLK_ALLOCTOR* _pallocator;
 		blk_* _phead;
 		blk_* _ptail;
 		size_t _size;//当前字节数
 		size_t _sizemax;//最大字节数
-
-		inline size_t blksize() {
-			return _pallocator->sizeblk() - sizeof(blk_);
-		}
 
 		char* pdata_(blk_* pblk_) {
 			return (char*)pblk_ + sizeof(blk_);
@@ -204,6 +201,10 @@ namespace ec {
 
 		inline bool empty() {
 			return (_phead == nullptr || 0 == _phead->len);
+		}
+
+		inline size_t blksize() {
+			return _pallocator->sizeblk() - sizeof(blk_);
 		}
 
 		inline bool blkfull(blk_* pblk) {

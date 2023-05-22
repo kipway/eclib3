@@ -2,10 +2,11 @@
 \file ec_netsrv.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.2.3
-2023.5.13 remove ec::memory
-2023.2.3 optimize ipv6
-2023.1.27 add ipv6 tcp server
+\update 2023-5-21
+  2023-5-21 support big file http download
+  2023-5-13 remove ec::memory
+  2023-2-03 optimize ipv6
+  2023-1-27 add ipv6 tcp server
 
 net::server
 	a class for TCP/UDP, HTTP/HTTPS, WS/WSS
@@ -794,10 +795,19 @@ namespace ec
 						else {
 							if ((n = ps->sendbuf()) < 0) {
 								closeucid(puid[i]);
+								if(_plog)
+									_plog->add(CLOG_DEFAULT_MSG, "disconnect ucid(%u) @sendbuf() failed", puid[i]);
 								continue;
 							}
 							if (n > 0)
 								_plog->add(CLOG_DEFAULT_DBG, "ucid(%u) send buf %d bytes, sndbuf size %zu", puid[i], n, ps->sndbufsize());
+							if (ps->sndbufempty()) {
+								if (!ps->onSendCompleted()) {
+									if (closeucid(puid[i]) && _plog)
+										_plog->add(CLOG_DEFAULT_MSG, "disconnect ucid(%u) @onSendCompleted() failed", puid[i]);
+									continue;
+								}
+							}
 							onsend_c_end(puid[i], ps->_protoc, ps->_listenid);
 						}
 						t_ssbufsize t;
@@ -816,7 +826,7 @@ namespace ec
 							continue;
 						if ((ps->_protoc & EC_NET_SS_CONOUT) && ps->_status == EC_NET_ST_PRE)
 							p[i].events = POLLOUT;
-						else if (!ps->sndbufempty())
+						else if (!ps->sndbufempty() || ps->hasSendJob())
 							p[i].events = POLLOUT | POLLIN;
 						else
 							p[i].events = POLLIN;
@@ -1020,7 +1030,7 @@ namespace ec
 					t.fd = v->_fd;
 					if ((EC_NET_SS_CONOUT & v->_protoc) && !v->_status)
 						t.events = POLLOUT;
-					else if (v->sndbufsize())
+					else if (v->sndbufsize() || v->hasSendJob())
 						t.events = POLLIN | POLLOUT;
 					else
 						t.events = POLLIN;

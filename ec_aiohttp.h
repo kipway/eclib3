@@ -5,6 +5,12 @@ eclib3 AIO
 Asynchronous http/ws session
 
 \author  jiangyong
+\update 
+  2023-5-21 update for http download big file
+
+eclib 3.0 Copyright (c) 2017-2023, kipway
+Licensed under the Apache License, Version 2.0 (the "License");
+You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 */
 
 #pragma once
@@ -329,8 +335,12 @@ namespace ec {
 
 		class session_http : public session, public basews
 		{
+		protected:
+			long long _downpos; //下载文件位置
+			long long _sizefile;//文件总长度
+			ec::string _downfilename;
 		public:
-			session_http(session&& ss) : session(std::move(ss))
+			session_http(session&& ss) : session(std::move(ss)), _downpos(0), _sizefile(0)
 			{
 				_protocol = EC_AIO_PROC_HTTP;
 			}
@@ -363,6 +373,39 @@ namespace ec {
 			{
 				return ws_send(_fd, pdata, size, plog);
 			}
+			virtual bool onSendCompleted() //return false will disconnected
+			{
+				if (_protocol != EC_AIO_PROC_HTTP || !_sizefile || _downfilename.empty())
+					return true;
+				ec::string sbuf;
+				sbuf.reserve(1024 * 30);
+				if (!io::lckread(_downfilename.c_str(), &sbuf, _downpos, 1024 * 30))
+					return false;
+				if (sbuf.empty()) {
+					_downpos = 0;
+					_sizefile = 0;
+					_downfilename.clear();
+					return true;
+				}
+				_downpos += (long long)sbuf.size();
+				if (_downpos >= _sizefile) {
+					_downpos = 0;
+					_sizefile = 0;
+					_downfilename.clear();
+				}
+				return session::sendasyn(sbuf.data(), sbuf.size(), nullptr) >= 0;
+			}
+
+			virtual void setHttpDownFile(const char* sfile, long long pos, long long filelen)
+			{
+				_downfilename = sfile;
+				_downpos = pos;
+				_sizefile = filelen;
+			}
+
+			virtual bool hasSendJob() {
+				return _sizefile && _downfilename.size();
+			};
 		};
 	}//namespace aio
 }//namespace ec

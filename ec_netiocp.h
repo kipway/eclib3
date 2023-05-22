@@ -2,8 +2,8 @@
 * @file ec_netiocp.h
 * base net server class use IOCP for windows
 * @author jiangyong
-*
-* update 2023-2-9 first version
+* @update
+    2023-5-21 for http download big file
 *
 * eclib 3.0 Copyright (c) 2017-2023, kipway
 
@@ -26,11 +26,11 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #endif
 
 #ifndef SIZE_IOCP_POSTSNDBUF
-#define SIZE_IOCP_POSTSNDBUF 32000 //size post send buffer
+#define SIZE_IOCP_POSTSNDBUF (EC_AIO_SNDBUF_BLOCKSIZE - EC_ALLOCTOR_ALIGN) //size post send buffer
 #endif
 
 #ifndef SIZE_IOCP_POSTRCVBUF
-#define SIZE_IOCP_POSTRCVBUF 32000 //size post recv buffer
+#define SIZE_IOCP_POSTRCVBUF EC_AIO_READONCE_SIZE //size post recv buffer
 #endif
 
 #ifndef EC_AIO_UDP_MAXSIZE
@@ -751,7 +751,14 @@ namespace ec {
 				psession pss = getSession(kfd);
 				if (!pss)
 					return 0;
-
+				if (pss->_sndbuf.empty()) {
+					if (!pss->onSendCompleted()) {
+						if (_plog)
+							_plog->add(CLOG_DEFAULT_MSG, "disconnect fd(%d) @onSendCompleted() failed", kfd);
+						closefd(kfd);
+						return -1;
+					}
+				}
 				const void* pd = nullptr;
 				size_t zlen = 0;
 				pd = pss->_sndbuf.get(zlen);

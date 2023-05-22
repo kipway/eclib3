@@ -1,11 +1,12 @@
 ﻿/*!
-\file ec_netsrv_base.h
+\file ec_netss_base.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.5.13 remove ec::memory
-\update 2023.2.3
+\update 2023-5-21
+  2023-5-21 support big file http download
+  2023-5-13 remove ec::memory
+  2023-2-3 upgrade session _ip size for ipv6
 
-// 2023.2.3 upgrade session _ip size for ipv6
 session class for net::server.
 
 net::session
@@ -77,7 +78,13 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #define EC_NET_SS_CONOUT 0x4000 // session protocol base connect out
 
 #ifndef NET_SENDBUF_MAXSIZE // Maximum PKG Protocol packet size
-#	define NET_SENDBUF_MAXSIZE (1024 * 1024 * 64)
+#if defined(_MEM_TINY) // < 256M
+#define NET_SENDBUF_MAXSIZE (1024 * 1024 * 4)
+#elif defined(_MEM_SML) // < 1G
+#define NET_SENDBUF_MAXSIZE (1024 * 1024 * 16)
+#else
+#define NET_SENDBUF_MAXSIZE (1024 * 1024 * 64)
+#endif
 #endif
 
 #ifndef EC_NET_SEND_BLOCK_OVERSECOND // Maximum blocking time(seconds)
@@ -215,17 +222,6 @@ namespace ec
 				_timelastio = ::time(0);
 				_timeconnect = ec::mstime();
 			}
-			/*
-			session(session* p) : _listenid(p->_listenid), _protoc(p->_protoc), _status(p->_status), _fd(p->_fd), _ucid(p->_ucid)
-				, _timelastio(p->_timelastio), _timesndblcok(p->_timesndblcok), _time_err(p->_time_err)
-				, _pause_r(p->_pause_r), _peerport(p->_peerport), _timeconnect(p->_timeconnect), _pextdata(p->_pextdata)
-				, _pssmem(p->_pssmem), _psslog(p->_psslog), _rbuf(std::move(p->_rbuf))
-				, _sndbuf(std::move(p->_sndbuf))
-			{
-				memcpy(_ip, p->_ip, sizeof(_ip));
-				p->_fd = INVALID_SOCKET;//move
-				p->_pextdata = nullptr; //move
-			}*/
 
 			session(session&& v) noexcept
 				: _rbuf(std::move(v._rbuf)), _sndbuf(std::move(v._sndbuf))
@@ -425,6 +421,10 @@ namespace ec
 			{
 				strlcpy(_ip, sip, sizeof(_ip));
 			};
+
+			virtual bool onSendCompleted() { return true; } //return false will disconnected
+			virtual void setHttpDownFile(const char* sfile, long long pos, long long filelen) {};
+			virtual bool hasSendJob() { return false; };
 		};
 
 		/*!

@@ -3,13 +3,14 @@
 
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.5.20
-2023.5.20 update http range
-2023.5.13 remove ec::memory
+\update 2020-5-21
+  2023-5-21 support big file download
+  2023-5-20 update http range
+  2023-5-13 remove ec::memory
 httpsrv
 	class for http/https server
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,16 +25,6 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 
 #include "ec_netsrv.h"
 #include "ec_http.h"
-
-#ifndef MAXSIZE_HTTP_DOWNFILE
-#if defined(_MEM_TINY) // < 256M
-#define MAXSIZE_HTTP_DOWNFILE (2 * 1024 * 1024)
-#elif defined(_MEM_SML) // < 1G
-#define MAXSIZE_HTTP_DOWNFILE (8 * 1024 * 1024)
-#else
-#define MAXSIZE_HTTP_DOWNFILE (16 * 1024 * 1024)
-#endif
-#endif
 
 #ifndef HTTP_RANGE_SIZE
 #if defined(_MEM_TINY) // < 256M
@@ -108,24 +99,41 @@ namespace ec
 
 			bool httpwrite(uint32_t ucid, http::package* pPkg, const char* html, size_t size, const char* stype)
 			{
-				try {
-					bytes vs;
-					vs.reserve(1024 * 16);
-					str128 content_type;
-					bool bzip = true;
-					if (stype && *stype) {
-						_pmine->getmime(stype, content_type);
-						bzip = !http::iszipfile(stype);
-					}
-					if (!pPkg->make(&vs, 200, "ok", content_type.c_str(), "Accept-Ranges: bytes\r\n", html, size, bzip))
-						return false;
-					return sendbyucid(ucid, vs.data(), vs.size()) >= 0;
+				bytes vs;
+				vs.reserve(1024 * 16);
+				str128 content_type;
+				bool bzip = true;
+				if (stype && *stype) {
+					_pmine->getmime(stype, content_type);
+					bzip = !http::iszipfile(stype);
 				}
-				catch (...) {
-					if (_plog)
-						_plog->add(CLOG_DEFAULT_ERR, "ucid(%u) httpwrite bytes %zu exception", ucid, size);
+				if (!pPkg->make(&vs, 200, "ok", content_type.c_str(), "Accept-Ranges: bytes\r\n", html, size, bzip))
 					return false;
+				return sendbyucid(ucid, vs.data(), vs.size()) >= 0;
+			}
+
+			bool httpwrite(uint32_t ucid, int status, const char* statusmsg, const char* shead,
+				const void* pbody = nullptr, size_t sizebody = 0)
+			{
+				bytes vs;
+				vs.reserve(1024 + sizebody);
+
+				str1k stmp;
+				if (!stmp.format("HTTP/1.1 %d %s\r\n", status, statusmsg))
+					return false;
+				vs.append(stmp);
+				vs.append("Connection: keep-alive\r\n");
+				if (shead && *shead)
+					vs.append(shead);
+				if (pbody && sizebody) {
+					if (!stmp.format("Content-Length: %zu\r\n\r\n", sizebody))
+						return false;
+					vs.append(stmp);
+					vs.append(pbody, sizebody);
 				}
+				else
+					vs.append("\r\n");
+				return sendbyucid(ucid, vs.data(), vs.size()) >= 0;
 			}
 
 			void loghttphead(int loglevel, const char* sinfo, ilog* plog, http::package* ph) //output http heade to log
@@ -198,6 +206,37 @@ namespace ec
 				}
 				const char* sext = ec::http::file_extname(sfile);
 				return httpwrite(ucid, pPkg, data.data(), data.size(), sext);
+			}
+
+			bool downbigfile(uint32_t ucid, http::package* pPkg, const char* sfile, long long filelen)
+			{
+				if (filelen <= HTTP_RANGE_SIZE) {
+					return downfile(ucid, pPkg, sfile);
+				}
+				ec::string data, sContent;
+				data.reserve(HTTP_RANGE_SIZE + 400);
+				data = "HTTP/1.1 200 ok\r\nServer: eclib3 web server\r\n";
+				data += "Connection: keep-alive\r\nAccept-Ranges: bytes\r\n";
+
+				const char* sext = ec::http::file_extname(sfile);
+				if (sext && *sext && _pmine->getmime(sext, sContent)) {
+					data.append("Content-type: ").append(sContent).append("\r\n");
+				}
+				else
+					data += "Content-type: application/octet-stream\r\n";
+				data.append("Content-Length: ").append(ec::to_string(filelen)).append("\r\n\r\n");
+
+				if (!ec::io::lckread(sfile, &data, 0, HTTP_RANGE_SIZE, filelen)) {
+					httpreterr(ucid, ec::http_sret404, 404);
+					return true;
+				}
+				if (sendbyucid(ucid, data.data(), data.size()) < 0)
+					return false;
+				ec::net::session* ps = get_session(ucid);
+				if(!ps)
+					return false;
+				ps->setHttpDownFile(sfile, HTTP_RANGE_SIZE, filelen);
+				return true;
 			}
 
 			bool DoGetRang(uint32_t ucid, const char* sfile, ec::http::package* pPkg, int64_t lpos, int64_t lsize, int64_t lfilesize)
@@ -311,9 +350,8 @@ namespace ec
 					}
 				}
 				if (!rangpos && !rangsize) { // get all
-					if (flen > MAXSIZE_HTTP_DOWNFILE) { // force range
-						return DoGetRang(ucid, sfile.c_str(), &http, rangpos, HTTP_RANGE_SIZE, flen);
-					}
+					if (flen > HTTP_RANGE_SIZE * 8)
+						return downbigfile(ucid, &http, sfile.c_str(), flen);
 					return downfile(ucid, &http, sfile.c_str());
 				}
 				return DoGetRang(ucid, sfile.c_str(), &http, rangpos, rangsize, flen);

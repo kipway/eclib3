@@ -5,6 +5,12 @@ eclib3 AIO
 Asynchronous session base class
 
 \author  jiangyong
+\update
+  2023-5-21 update for http download big file
+
+eclib 3.0 Copyright (c) 2017-2023, kipway
+Licensed under the Apache License, Version 2.0 (the "License");
+You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 */
 
 #pragma once
@@ -13,6 +19,10 @@ Asynchronous session base class
 #include "ec_string.h"
 #include "ec_log.h"
 #include "ec_queue.h"
+
+#ifndef EC_AIO_READONCE_SIZE 
+#define EC_AIO_READONCE_SIZE (1024 * 14)
+#endif
 
 #ifndef EC_AIO_SNDBUF_BLOCKSIZE
 #define EC_AIO_SNDBUF_BLOCKSIZE (1024 * 32) // 32K
@@ -260,6 +270,9 @@ namespace ec {
 			{
 				return nullptr;
 			}
+			virtual bool onSendCompleted() { return true; } //return false will disconnected
+			virtual void setHttpDownFile(const char* sfile, long long pos, long long filelen) {};
+			virtual bool hasSendJob() { return false; };
 		};
 
 		typedef session* psession;

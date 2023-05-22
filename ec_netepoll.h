@@ -2,11 +2,13 @@
 * @file ec_netepoll.h
 * base net server class use epoll for linux
 * 
-* @author jaingyong
-* update 2023-5.13 remove ec::memory
-* update 2023-2-9 first version
-* 
-* * eclib 3.0 Copyright (c) 2017-2023, kipway
+* @author jiangyong
+* @update
+    2023-5-21 update for download big http file
+    2023-5.13 remove ec::memory
+    2023-2-09 first version
+
+* eclib 3.0 Copyright (c) 2017-2023, kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
 You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -20,10 +22,6 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_vector.hpp"
 #ifndef SIZE_MAX_FD
 #define SIZE_MAX_FD  16384 //最大fd连接数
-#endif
-
-#ifndef EC_AIO_READONCE_SIZE
-#define EC_AIO_READONCE_SIZE 32000
 #endif
 
 namespace ec {
@@ -381,7 +379,7 @@ namespace ec {
 
 				if (sizeCanRecv(pss) > 0 && !pss->_readpause)
 					evtmod.events |= EPOLLIN;
-				if (!pss->_sndbuf.empty() || pss->_status == EC_AIO_FD_CONNECTING)
+				if (!pss->_sndbuf.empty() || pss->_status == EC_AIO_FD_CONNECTING || pss->hasSendJob())
 					evtmod.events |= EPOLLOUT;
 				evtmod.data.fd = pss->_fd;
 
@@ -554,6 +552,12 @@ namespace ec {
 				if (sendbuf(pss) < 0) {
 					closefd(kfd);
 					return -1;
+				}
+				if (pss->_sndbuf.empty()) {
+					if (!pss->onSendCompleted()) {
+						closefd(kfd);
+						return -1;
+					}
 				}
 				return 0;
 			}

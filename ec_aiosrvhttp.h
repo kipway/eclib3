@@ -4,22 +4,19 @@
 http/ws server 
 
 \author  jiangyong
+
+\update 
+  2023-5-21 update for http download big file
+
+eclib 3.0 Copyright (c) 2017-2023, kipway
+Licensed under the Apache License, Version 2.0 (the "License");
+You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 */
 
 #pragma once
 
 #include "ec_aiosrv.h"
 #include "ec_diskio.h"
-
-#ifndef MAXSIZE_AIOHTTP_DOWNFILE
-#if defined(_MEM_TINY) // < 256M
-#define MAXSIZE_AIOHTTP_DOWNFILE (2 * 1024 * 1024)
-#elif defined(_MEM_SML) // < 1G
-#define MAXSIZE_AIOHTTP_DOWNFILE (4 * 1024 * 1024)
-#else
-#define MAXSIZE_AIOHTTP_DOWNFILE (16 * 1024 * 1024)
-#endif
-#endif
 
 #ifndef HTTP_RANGE_SIZE
 #if defined(_MEM_TINY) // < 256M
@@ -172,6 +169,36 @@ namespace ec {
 				const char* sext = ec::http::file_extname(sfile);
 				return httpwrite(fd, pPkg, data.data(), data.size(), sext);
 			}
+			bool downbigfile(int fd, http::package* pPkg, const char* sfile, long long filelen)
+			{
+				if (filelen <= HTTP_RANGE_SIZE) {
+					return downfile(fd, pPkg, sfile);
+				}
+				ec::string data, sContent;
+				data.reserve(HTTP_RANGE_SIZE + 400);
+				data = "HTTP/1.1 200 ok\r\nServer: eclib3 web server\r\n";
+				data += "Connection: keep-alive\r\nAccept-Ranges: bytes\r\n";
+
+				const char* sext = ec::http::file_extname(sfile);
+				if (sext && *sext && _pmine->getmime(sext, sContent)) {
+					data.append("Content-type: ").append(sContent).append("\r\n");
+				}
+				else
+					data += "Content-type: application/octet-stream\r\n";
+				data.append("Content-Length: ").append(ec::to_string(filelen)).append("\r\n\r\n");
+
+				if (!ec::io::lckread(sfile, &data, 0, HTTP_RANGE_SIZE, filelen)) {
+					httpreterr(fd, ec::http_sret404, 404);
+					return true;
+				}
+				if (sendtofd(fd, data.data(), data.size()) < 0)
+					return false;
+				ec::aio::session* ps = getsession(fd);
+				if(!ps)
+					return false;
+				ps->setHttpDownFile(sfile, HTTP_RANGE_SIZE, filelen);
+				return true;
+			}
 			bool DoGetRang(int fd, const char* sfile, ec::http::package* pPkg, int64_t lpos, int64_t lsize, int64_t lfilesize)
 			{
 				str1k tmp;
@@ -264,9 +291,8 @@ namespace ec {
 					}
 				}
 				if (!rangpos && !rangsize) { // get all
-					if (flen > MAXSIZE_AIOHTTP_DOWNFILE) { // force range
-						return DoGetRang(fd, sfile.c_str(), &http, rangpos, HTTP_RANGE_SIZE, flen);
-					}
+					if (flen > HTTP_RANGE_SIZE * 8)
+						return downbigfile(fd, &http, sfile.c_str(), flen);
 					return downfile(fd, &http, sfile.c_str());
 				}
 				return DoGetRang(fd, sfile.c_str(), &http, rangpos, rangsize, flen);
