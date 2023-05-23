@@ -276,18 +276,14 @@ namespace ec {
 					return http.HasKeepAlive();
 				}
 				sfile = (const char*)_pathhttp;
-				if (utf8[0] == '/') {
-					if (1 == utf8.size())
-						sfile += "index.html";
-					else
-						sfile += utf8.c_str() + 1;
-				}
+				if (utf8[0] == '/')
+					sfile.append(utf8.data() + 1, utf8.size() - 1);
 				else
-					sfile += utf8;
-				if (ec::http::isdir(sfile.c_str())) {
-					httpreterr(fd, ec::http_sret404, 404);
-					return http.HasKeepAlive();
-				}
+					sfile.append(utf8.data(), utf8.size());
+				if (sfile.back() == '/')
+					sfile += "index.html";
+				else if (ec::http::isdir(sfile.c_str()))
+					sfile += "/index.html";
 				long long flen = ec::io::filesize(sfile.c_str());
 				if (flen < 0) {
 					httpreterr(fd, ec::http_sret404, 404);

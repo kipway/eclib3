@@ -127,10 +127,10 @@ namespace ec
 #ifdef _WIN32
 			wchar_t wfile[512];
 			wfile[0] = 0;
-			if (!MultiByteToWideChar(CP_UTF8, 0, utf8name, -1, wfile, sizeof(wfile) / sizeof(wchar_t)))
+			if (!MultiByteToWideChar(ec::strisutf8(utf8name) ? CP_UTF8 : CP_ACP, 0, utf8name, -1, wfile, sizeof(wfile) / sizeof(wchar_t)))
 				return false;
-			struct _stat st;
-			if (_wstat(wfile, &st))
+			struct __stat64 st;
+			if (_wstat64(wfile, &st))
 				return false;
 			if (st.st_mode & S_IFDIR)
 				return true;
