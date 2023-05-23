@@ -6,7 +6,8 @@ http/ws server
 \author  jiangyong
 
 \update 
-  2023-5-21 update for http download big file
+  2023-5-23 update http rang download big file
+  2023-5-21 update http download big file
 
 eclib 3.0 Copyright (c) 2017-2023, kipway
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -119,23 +120,21 @@ namespace ec {
 				}
 				plog->add(loglevel, "%s\n%s", sinfo, vs.c_str());
 			}
-			bool parserange(const char* stxt, size_t txtlen, int64_t& lpos, int64_t& lsize)
+			bool parserange(const char* stxt, size_t txtlen, int64_t& lpos, int64_t& lposend)
 			{
-				char suints[8] = { 0 }, spos[16] = { 0 }, ssize[8] = { 0 };
+				char suints[16] = { 0 }, spos[16] = { 0 }, send[16] = { 0 };
 				size_t pos = 0;
-				if (!ec::strnext('=', stxt, txtlen, pos, suints, sizeof(suints)) || !ec::strieq("bytes", suints))
+				if (!strnext('=', stxt, txtlen, pos, suints, sizeof(suints)) || !strieq("bytes", suints))
 					return false;
-				if (!ec::strnext('-', stxt, txtlen, pos, spos, sizeof(spos)))
+				if (!strnext('-', stxt, txtlen, pos, spos, sizeof(spos)))
 					return false;
 				lpos = atoll(spos);
-				if (!ec::strnext(',', stxt, txtlen, pos, ssize, sizeof(ssize)))
-					lsize = 0;
+				if (lpos < 0)
+					lpos = 0;
+				if (!strnext(',', stxt, txtlen, pos, send, sizeof(send)))
+					lposend = -1;
 				else
-					lsize = atoll(ssize) - lpos;
-				if (lsize <= 0)
-					lsize = HTTP_RANGE_SIZE;
-				else if (lsize > HTTP_RANGE_SIZE * 8)
-					lsize = HTTP_RANGE_SIZE * 8;
+					lposend = atoll(send);
 				return true;
 			}
 			bool DoHead(int fd, const char* sfile, ec::http::package* pPkg)
@@ -166,6 +165,11 @@ namespace ec {
 					httpreterr(fd, ec::http_sret404, 404);
 					return pPkg->HasKeepAlive();
 				}
+				ec::aio::session* ps = getsession(fd);
+				if (!ps)
+					return false;
+				if (ps->hasSendJob())
+					ps->setHttpDownFile(nullptr, 0, 0);
 				const char* sext = ec::http::file_extname(sfile);
 				return httpwrite(fd, pPkg, data.data(), data.size(), sext);
 			}
@@ -191,19 +195,20 @@ namespace ec {
 					httpreterr(fd, ec::http_sret404, 404);
 					return true;
 				}
-				if (sendtofd(fd, data.data(), data.size()) < 0)
-					return false;
+				if (_plog)
+					_plog->add(CLOG_DEFAULT_DBG, "fd(%u) http down file '%s', Content-Length=%lld",
+						fd, sfile, filelen);
 				ec::aio::session* ps = getsession(fd);
-				if(!ps)
+				if (!ps)
 					return false;
 				ps->setHttpDownFile(sfile, HTTP_RANGE_SIZE, filelen);
-				return true;
+				return sendtofd(fd, data.data(), data.size()) >= 0;
 			}
-			bool DoGetRang(int fd, const char* sfile, ec::http::package* pPkg, int64_t lpos, int64_t lsize, int64_t lfilesize)
+			bool DoGetRang(int fd, const char* sfile, ec::http::package* pPkg, int64_t lpos, int64_t lposend, int64_t lfilesize)
 			{
 				str1k tmp;
 				ec::string answer;
-				if (lpos >= lfilesize) {
+				if (lpos >= lposend || lposend + 1 > lfilesize) {
 					answer.reserve(512);
 					answer += "HTTP/1.1 416 Range Not Satisfiable\r\nServer: eclib web server\r\n";
 					if (pPkg->HasKeepAlive())
@@ -212,8 +217,8 @@ namespace ec {
 					answer.append(tmp);
 					return sendtofd(fd, answer.data(), answer.size()) >= 0;
 				}
-				int64_t sizeContent = (lpos + lsize <= lfilesize) ? lsize : lfilesize - lpos;
-				answer.reserve((size_t)sizeContent + 512);
+				int64_t sizeContent = lposend - lpos + 1;
+				answer.reserve(HTTP_RANGE_SIZE + 512);
 				answer += "HTTP/1.1 206 Partial Content\r\nServer: eclib web server\r\n";
 				if (pPkg->HasKeepAlive())
 					answer += "Connection: keep-alive\r\n";
@@ -232,13 +237,21 @@ namespace ec {
 				if (!tmp.format("Content-Length: %jd\r\n\r\n", sizeContent))
 					return false;
 				answer += tmp;
-				if (!io::lckread(sfile, &answer, lpos, lsize, lfilesize)) {
+				int64_t lread = sizeContent > HTTP_RANGE_SIZE ? HTTP_RANGE_SIZE : sizeContent;
+				if (!io::lckread(sfile, &answer, lpos, lread, lfilesize)) {
 					httpreterr(fd, ec::http_sret404, 404);
 					return pPkg->HasKeepAlive();
 				}
 				if (_plog)
-					_plog->add(CLOG_DEFAULT_DBG, "http write Content-Length=%jd fd(%d) rang %jd-%jd/%jd", sizeContent, fd,
-						lpos, (lpos + sizeContent - 1), lfilesize);
+					_plog->add(CLOG_DEFAULT_DBG, " fd(%d) http down file '%s' Content-Length=%jd rang %jd-%jd/%jd", 
+						fd, sfile, sizeContent, lpos, (lpos + sizeContent - 1), lfilesize);
+				ec::aio::session* ps = getsession(fd);
+				if (!ps)
+					return false;
+				if (lpos + lread < lfilesize)
+					ps->setHttpDownFile(sfile, lpos + lread, lfilesize);
+				else
+					ps->setHttpDownFile(nullptr, 0, 0);
 				return sendtofd(fd, answer.data(), answer.size()) >= 0;
 			}
 			bool dohttp(int fd, const uint8_t* pkg, size_t pkgsize)
@@ -282,20 +295,21 @@ namespace ec {
 				}
 				if (http.ismethod("HEAD"))
 					return DoHead(fd, sfile.c_str(), &http);
-				int64_t rangpos = 0, rangsize = 0;
+
 				utf8.clear();
-				if (http.GetHeadFiled("Range", utf8)) { // "Range: bytes=0-1023"
-					if (!parserange(utf8.data(), utf8.size(), rangpos, rangsize)) {
+				if (http.GetHeadFiled("Range", utf8)) { // "Range: bytes=0-1023" or "Range: bytes=0-"
+					int64_t rangpos = 0, rangposend = 0;
+					if (!parserange(utf8.data(), utf8.size(), rangpos, rangposend)) {
 						httpreterr(fd, ec::http_sret413, 413);
 						return http.HasKeepAlive();
 					}
+					if (rangposend <= 0)
+						rangposend = flen - 1;
+					return DoGetRang(fd, sfile.c_str(), &http, rangpos, rangposend, flen);
 				}
-				if (!rangpos && !rangsize) { // get all
-					if (flen > HTTP_RANGE_SIZE * 8)
-						return downbigfile(fd, &http, sfile.c_str(), flen);
-					return downfile(fd, &http, sfile.c_str());
-				}
-				return DoGetRang(fd, sfile.c_str(), &http, rangpos, rangsize, flen);
+				if (flen > HTTP_RANGE_SIZE * 16)
+					return downbigfile(fd, &http, sfile.c_str(), flen);
+				return downfile(fd, &http, sfile.c_str());
 			}
 		};
 	}//namespace aio

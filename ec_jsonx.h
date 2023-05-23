@@ -351,7 +351,7 @@ namespace ec
 			ec::json jvs;
 			if (!jvs.from_str(pkv->_v._str, pkv->_v._size))
 				return false;
-
+			vals.reserve(vals.size() + jvs.size());
 			for (auto i = 0u; i < jvs.size(); i++) {
 				pkv = jvs.at(i);
 				if (pkv && !pkv->_v.empty()) {
@@ -376,7 +376,7 @@ namespace ec
 			ec::json jvs;
 			if (!jvs.from_str(pkv->_v._str, pkv->_v._size))
 				return false;
-
+			vals.reserve(vals.size() + jvs.size());
 			for (auto i = 0u; i < jvs.size(); i++) {
 				pkv = jvs.at(i);
 				if (pkv && !pkv->_v.empty()) {
@@ -418,7 +418,7 @@ namespace ec
 			ec::json jvs, jv;
 			if (!jvs.from_str(pkv->_v._str, pkv->_v._size))
 				return false;
-
+			vals.reserve(vals.size() + jvs.size());
 			for (auto i = 0u; i < jvs.size(); i++) {
 				_CLS v;
 				pkv = jvs.at(i);

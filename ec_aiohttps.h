@@ -90,7 +90,10 @@ namespace ec {
 
 			virtual void setHttpDownFile(const char* sfile, long long pos, long long filelen)
 			{
-				_downfilename = sfile;
+				if (sfile && *sfile)
+					_downfilename = sfile;
+				else
+					_downfilename.clear();
 				_downpos = pos;
 				_sizefile = filelen;
 			}
