@@ -435,9 +435,18 @@ namespace ec
 			{
 				if (_protoc != EC_NET_SS_HTTP || !_sizefile || _downfilename.empty())
 					return true;
+				if (_downpos >= _sizefile) {
+					_downpos = 0;
+					_sizefile = 0;
+					_downfilename.clear();
+					return true;
+				}
 				ec::string sbuf;
-				sbuf.reserve(1024 * 30);
-				if (!io::lckread(_downfilename.c_str(), &sbuf, _downpos, 1024 * 30))
+				long long lread = 1024 * 30;
+				if (_downpos + lread > _sizefile)
+					lread = _sizefile - _downpos;
+				sbuf.reserve((size_t)lread);
+				if (!io::lckread(_downfilename.c_str(), &sbuf, _downpos, lread))
 					return false;
 				if (sbuf.empty()) {
 					_downpos = 0;

@@ -287,8 +287,8 @@ namespace ec
 				ec::net::session* ps = get_session(ucid);
 				if (!ps)
 					return false;
-				if(lpos + lread < lfilesize)
-					ps->setHttpDownFile(sfile, lpos + lread, lfilesize);
+				if(lpos + lread < lposend + 1)
+					ps->setHttpDownFile(sfile, lpos + lread, lposend + 1);
 				else
 					ps->setHttpDownFile(nullptr, 0, 0);
 				return sendbyucid(ucid, answer.data(), answer.size()) >= 0;
