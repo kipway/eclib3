@@ -3,7 +3,8 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update 
-2023.5.15 move ec::string to ec_string.hpp
+  2023.5.25 Support RFC8259 full JSON escaping
+  2023.5.15 move ec::string to ec_string.hpp
 
 string tips
 
@@ -956,14 +957,14 @@ namespace ec
 		return zcp;
 	}
 
-	inline size_t utf8_strlcpy(char* sd, const char* ss, size_t count)
+	inline size_t utf8_strlcpy(char* sd, const char* ss, size_t count, size_t sslen = 0)
 	{// like strlcpy for linux,add null to the end of sd,return strlen(ss), count is sd size
 		if (!ss || !(*ss)) {
 			if (sd && count)
 				*sd = '\0';
 			return 0;
 		}
-		const size_t srclen = strlen(ss);
+		size_t srclen = sslen ? sslen : strlen(ss);
 		if (!sd || !count)
 			return srclen;
 
@@ -976,14 +977,56 @@ namespace ec
 
 	inline bool jstr_needesc(const char* src, size_t srcsize)
 	{
-		bool besc = false;
 		for (auto i = 0u; i < srcsize; i++) {
-			if (src[i] == '\\' || src[i] == '\"') {
-				besc = true;
+			switch (src[i]) {
+			case '\b':
+			case '\t':
+			case '\n':
+			case '\r':
+			case '\f':
+			case '\"':
+			case '\\':
+			case '/':
+				return true;
 				break;
 			}
 		}
-		return besc;
+		return false;
+	}
+
+	template<class _STR>
+	void outJsonEsc(char c, _STR& sout)
+	{
+		switch (c) {
+		case '\b':
+			sout += '\\';
+			sout += 'b';
+			break;
+		case '\t':
+			sout += '\\';
+			sout += 't';
+			break;
+		case '\n':
+			sout += '\\';
+			sout += 'n';
+			break;
+		case '\r':
+			sout += '\\';
+			sout += 'r';
+			break;
+		case '\f':
+			sout += '\\';
+			sout += 'f';
+			break;
+		case '\"':
+		case '/':
+		case '\\':
+			sout += '\\';
+			sout += c;
+			break;
+		default:
+			sout += c;
+		}
 	}
 
 	template<typename _Str>
@@ -992,11 +1035,82 @@ namespace ec
 		so.clear();
 		const char *se = s + srcsize;
 		while (s < se) {
-			if (*s == '\\' || *s == '\"')
-				so += '\\';
-			so += *s++;
+			outJsonEsc(*s++, so);
 		}
 		return so.c_str();
+	}
+
+	template<typename _Str>
+	void Unicode2Utf8(uint32_t ucode, _Str& sout) {
+		using etp = typename _Str::value_type;
+		if (ucode < 0x80)// 0xxxxxxx
+			sout += static_cast<etp>(ucode);
+		else if (ucode < 0x800) {  // 110xxxxx 10xxxxxx
+			sout += static_cast<etp>(((ucode >> 6) & 0x1F) | 0xC0);
+			sout += static_cast<etp>(ucode & 0x3F) | 0x80;
+		}
+		else if (ucode < 0x10000) {// 1110xxxx 10xxxxxx 10xxxxxx
+			sout += static_cast<etp>(((ucode >> 12) & 0x0F) | 0xE0);
+			sout += static_cast<etp>(((ucode >> 6) & 0x3F) | 0x80);
+			sout += static_cast<etp>(ucode & 0x3F) | 0x80;
+		}
+		else if (ucode < 0x200000) {//11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+			sout += static_cast<etp>(((ucode >> 18) & 0x07) | 0xF0);
+			sout += static_cast<etp>(((ucode >> 12) & 0x3F) | 0x80);
+			sout += static_cast<etp>(((ucode >> 6) & 0x3F) | 0x80);
+			sout += static_cast<etp>(ucode & 0x3F) | 0x80;
+		}
+		else if (ucode < 0x4000000) {//111110xx 10xxxxxx 10xxxxxx 10xxxxxx 10xxxxxx
+			sout += static_cast<etp>(((ucode >> 24) & 0x03) | 0xF8);
+			sout += static_cast<etp>(((ucode >> 18) & 0x3F) | 0x80);
+			sout += static_cast<etp>(((ucode >> 12) & 0x3F) | 0x80);
+			sout += static_cast<etp>(((ucode >> 6) & 0x3F) | 0x80);
+			sout += static_cast<etp>(ucode & 0x3F) | 0x80;
+		}
+		else { //1111110x 10xxxxxx 10xxxxxx 10xxxxxx 10xxxxxx 10xxxxxx
+			sout += static_cast<etp>(((ucode >> 30) & 0x01) | 0xFC);
+			sout += static_cast<etp>(((ucode >> 24) & 0x3F) | 0x80);
+			sout += static_cast<etp>(((ucode >> 18) & 0x3F) | 0x80);
+			sout += static_cast<etp>(((ucode >> 12) & 0x3F) | 0x80);
+			sout += static_cast<etp>(((ucode >> 6) & 0x3F) | 0x80);
+			sout += static_cast<etp>(ucode & 0x3F) | 0x80;
+		}
+	}
+
+	/**
+	 * @brief 解析转义JSON utf-16
+	 * @param s 输入字符串, "\u0027"或者 "\uD950\uDF21"
+	 * @param len 字符串长度
+	 * @param ucodeout 输出转码后unicode
+	 * @return -1：错误; >=0 成功转义消耗的字节数。
+	*/
+	inline int parseJsonUtf16(const char* s, size_t len, uint32_t& ucodeout)
+	{
+		if (len < 6)
+			return -1;
+		uint8_t uc = 0;
+		uint32_t ucode = 0;
+		for (auto i = 0; i < 4; i++) {
+			if (!char2hex(s[i + 2], &uc))
+				return -1;
+			ucode = i ? (ucode << 4) + uc : uc;
+		}
+		if (ucode >= 0xD800 && ucode <= 0xDBFF) { //UTF-16高代理, 高10位
+			if (len < 12)
+				return -1;
+			uint32_t ulow = 0;
+			for (auto i = 0; i < 4; i++) { //继续解析低代理, 低10位
+				if (!char2hex(s[i + 8], &uc))
+					return -1;
+				ulow = i ? (ulow << 4) + uc : uc;
+			}
+			if (ulow < 0xDC00 || ucode > 0xDFFF) //不在低代理返回结束转义返回。
+				return -1;
+			ucodeout = ((ucode & 0x3FF) << 10) | (ulow & 0x3FF);
+			return 12;
+		}
+		ucodeout = ucode;
+		return 6;
 	}
 
 	template<typename _Str>
@@ -1016,12 +1130,49 @@ namespace ec
 			so.append(s, srcsize);
 			return so.c_str();
 		}
-
-		const char *se = s + srcsize;
+		so.reserve(srcsize);
+		int nchars;
+		uint32_t ucode;
+		const char* se = s + srcsize;
 		while (s < se) {
-			if (*s == '\\' && s + 1 < se && (*(s + 1) == '\"' || *(s + 1) == '\\'))
-				s++;
-			so += *s++;
+			if (*s == '\\') {
+				if (s + 1 >= se)
+					break;
+				switch (*(s + 1)) {
+				case '\"':
+				case '/':
+				case '\\':
+					so += *(s + 1);
+					break;
+				case 'b':
+					so += '\b';
+					break;
+				case 't':
+					so += '\t';
+					break;
+				case 'r':
+					so += '\r';
+					break;
+				case 'n':
+					so += '\n';
+					break;
+				case 'f':
+					so += '\f';
+					break;
+				case 'u':
+				case 'U':
+					nchars = parseJsonUtf16(s, static_cast<int>(se - s), ucode);
+					if (nchars < 0)
+						return so.c_str(); //错误, 结束转义返回
+					Unicode2Utf8(ucode, so);
+					s += nchars - 2;
+					break;
+				}
+				s += 2;
+			}
+			else {
+				so += *s++;
+			}
 		}
 		return so.c_str();
 	}
@@ -1056,44 +1207,22 @@ namespace ec
 
 	template<typename _Str>
 	void out_jstr(const char* s, size_t srcsize, _Str &sout)
-	{ //escape and append  to so,  escape  '\' -> '\\', '"' -> '\"' in s
+	{ //escape and append  to sout,  escape  '\' -> '\\', '"' -> '\"' in s
 		if (!s || !srcsize)
 			return;
 		if (!jstr_needesc(s, srcsize)) {
 			sout.append(s, srcsize);
 			return;
 		}
-		const char *se = s + srcsize;
+		const char* se = s + srcsize;
 		while (s < se) {
-			if (*s == '\\' || *s == '\"')
-				sout += '\\';
-			sout += *s++;
+			outJsonEsc(*s++, sout);
 		}
 	}
 
 	template<typename _Str>
-	void from_jstr(const char* s, size_t srcsize, _Str &sout)
+	inline void from_jstr(const char* s, size_t srcsize, _Str &sout)
 	{ // delete escape, "\\" -> '\', ""\'" -> '"' and set to sout
-		sout.clear();
-		if (!s || !srcsize)
-			return;
-		bool besc = false;
-		for (auto i = 0u; i < srcsize; i++) {
-			if (s[i] == '\\') {
-				besc = true;
-				break;
-			}
-		}
-		if (!besc) {
-			sout.append(s, srcsize);
-			return;
-		}
-
-		const char *se = s + srcsize;
-		while (s < se) {
-			if (*s == '\\' && s + 1 < se && (*(s + 1) == '\"' || *(s + 1) == '\\'))
-				s++;
-			sout += *s++;
-		}
+		jstr_fromesc(s, srcsize, sout);
 	}
 }// namespace ec

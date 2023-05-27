@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update
+  2023.5.25 Support RFC8259 full JSON escaping
   2023.5.18 add get_jstring another version
   2023.2.19 update get_jtime
 
@@ -221,69 +222,6 @@ namespace ec
 				sout.append(sp, s - sp);
 		}
 
-		inline bool fromjstr(const char* s, size_t srcsize, char* sout, size_t sizeout) // delete escape, "\\" -> '\', ""\'" -> '"' and set to sout
-		{
-			if (!sout || !sizeout)
-				return false;
-			if (!s || !srcsize) {
-				*sout = 0;
-				return false;
-			}
-			bool besc = false;
-			for (auto i = 0u; i < srcsize; i++) {
-				if (s[i] == '\\') {
-					besc = true;
-					break;
-				}
-			}
-			if (!besc) {
-				if (sizeout <= srcsize)
-					return false;
-				memcpy(sout, s, srcsize);
-				sout[srcsize] = 0;
-				return true;
-			}
-
-			const char* se = s + srcsize;
-			size_t zn = 0;
-			while (s < se) {
-				if (*s == '\\' && s + 1 < se && (*(s + 1) == '\"' || *(s + 1) == '\\'))
-					s++;
-				sout += *s++;
-				++zn;
-				if (zn >= sizeout)
-					return false;
-			}
-			sout[zn] = 0;
-			return true;
-		}
-
-		template<typename _Str = std::string>
-		void fromjstr(const char* s, size_t srcsize, _Str& sout) // delete escape, "\\" -> '\', ""\'" -> '"' and set to sout
-		{
-			sout.clear();
-			if (!s || !srcsize)
-				return;
-			bool besc = false;
-			for (auto i = 0u; i < srcsize; i++) {
-				if (s[i] == '\\') {
-					besc = true;
-					break;
-				}
-			}
-			if (!besc) {
-				sout.append(s, srcsize);
-				return;
-			}
-			sout.reserve(srcsize);
-			const char* se = s + srcsize;
-			while (s < se) {
-				if (*s == '\\' && s + 1 < se && (*(s + 1) == '\"' || *(s + 1) == '\\'))
-					s++;
-				sout += *s++;
-			}
-		}
-
 		template<typename _VAL>
 		bool get_jnumber(const char* key, _VAL& val)
 		{
@@ -310,7 +248,7 @@ namespace ec
 			val.clear();
 			if (!pkv)
 				return false;
-			fromjstr(pkv->_v._str, pkv->_v._size, val);
+			ec::jstr_fromesc(pkv->_v._str, pkv->_v._size, val);
 			return true;
 		}
 
@@ -322,7 +260,7 @@ namespace ec
 			val.clear();
 			if (!pkv)
 				return false;
-			fromjstr(pkv->_v._str, pkv->_v._size, val);
+			ec::jstr_fromesc(pkv->_v._str, pkv->_v._size, val);
 			return true;
 		}
 
@@ -335,7 +273,9 @@ namespace ec
 			pkv = getkv(key);
 			if (!pkv)
 				return false;
-			return fromjstr(pkv->_v._str, pkv->_v._size, sout, outsize);
+			ec::fixstring varstr(sout, outsize);
+			ec::jstr_fromesc(pkv->_v._str, pkv->_v._size, varstr);
+			return true;
 		}
 
 		template<typename _STR, class ALLOCATOR_ = std::allocator<_STR>>
@@ -356,7 +296,7 @@ namespace ec
 				pkv = jvs.at(i);
 				if (pkv && !pkv->_v.empty()) {
 					_STR v;
-					fromjstr(pkv->_v._str, pkv->_v._size, v);
+					ec::jstr_fromesc(pkv->_v._str, pkv->_v._size, v);
 					vals.push_back(std::move(v));
 				}
 			}
@@ -702,9 +642,7 @@ namespace ec
 
 			const char* s = val.data(), * se = s + val.size();
 			while (s < se) {
-				if (*s == '\\' || *s == '\"')
-					sout += '\\';
-				sout += *s++;
+				ec::outJsonEsc(*s++, sout);
 			}
 			sout.push_back('"');
 		}
@@ -726,9 +664,7 @@ namespace ec
 
 			const char* s = val, * se = s + sizeval;
 			while (s < se) {
-				if (*s == '\\' || *s == '\"')
-					sout += '\\';
-				sout += *s++;
+				ec::outJsonEsc(*s++, sout);
 			}
 			sout.push_back('"');
 		}

@@ -2,7 +2,8 @@
 \file ec_string.hpp
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.5.18
+\update 
+2023.5.25 add fixstring_
 2023.5.13 use ec_malloc
 
 ec basic string
@@ -16,6 +17,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 
 #pragma once
 #include <memory.h>
+#include <malloc.h>
 #include <string>
 #include <ctype.h>
 #include <type_traits>
@@ -806,4 +808,127 @@ namespace ec
 		_Left.push_back(_Right);
 		return (std::move(_Left));
 	}
+
+	/**
+	 * @brief fixed length string
+	 * @tparam chart : char or unsigned char
+	*/
+	template<typename chart = char,
+		class = typename std::enable_if<sizeof(chart) == 1>::type >
+	class fixstring_
+	{
+	public:
+		using value_type = chart;
+		using pointer = chart*;
+		using const_pointer = const chart*;
+		using iterator = chart*;
+		using const_iterator = const chart*;
+		using reference = chart&;
+		using const_reference = const chart&;
+	private:
+		uint32_t _size, _bufsize;
+		pointer _buf;
+	public:		
+		fixstring_(void *pbuf, size_t bufsize) : _size(0)
+		{			
+			_bufsize = (uint32_t)bufsize;
+			_buf = (pointer)pbuf;
+			_buf[0] = 0;
+		}
+		~fixstring_() {
+			if (_buf && _size < _bufsize)
+				_buf[_size] = 0;
+		}
+		inline iterator begin() noexcept
+		{
+			return _buf;
+		}
+		inline const_iterator begin() const noexcept
+		{
+			return _buf;
+		}
+		inline iterator end() noexcept
+		{
+			return _buf + _size;
+		}
+		inline const_iterator end() const noexcept
+		{
+			return _buf + _size;
+		}
+		inline size_t size() const noexcept
+		{
+			return _size;
+		}
+		inline size_t length() const noexcept
+		{
+			return _size;
+		}
+		inline size_t max_size() const noexcept
+		{
+			return _bufsize - 1;
+		}
+		inline size_t capacity() const noexcept
+		{
+			return _bufsize - 1;
+		}
+		inline void clear() noexcept
+		{
+			_size = 0;
+		}
+		inline bool empty() const noexcept
+		{
+			return 0 == _size;
+		}
+		inline void reserve(size_t n)
+		{
+		}
+	public: //Element access
+		inline reference operator[] (size_t pos)
+		{
+			return (pos < _bufsize) ? _buf[pos] : _buf[0];
+		}
+		inline const_reference operator[] (size_t pos) const
+		{
+			return (pos < _bufsize) ? _buf[pos] : _buf[0];
+		}
+
+	public: //Modifiers
+		fixstring_& append(const_pointer s, size_t n)
+		{
+			if (_size + (uint32_t)n < capacity()) {
+				memcpy(_buf + _size, s, n);
+				_size += (uint32_t)n;
+			}
+			return *this;
+		}
+		inline void push_back(value_type c)
+		{
+			if (_size + 1 < capacity()) {
+				_buf[_size++] = c;
+			}
+		}
+		fixstring_& operator+= (value_type c)
+		{
+			if (_size + 1 < capacity()) {
+				_buf[_size++] = c;
+			}
+			return *this;
+		}
+	public: //operations
+		inline const_pointer c_str() const noexcept
+		{
+			_buf[_size] = 0;
+			return _buf;
+		}
+		inline const_pointer data() const noexcept
+		{
+			return _buf;
+		}
+		inline void endstr() const noexcept
+		{
+			_buf[_size] = 0;
+		}
+	};
+
+	using fixstring = fixstring_<char>;
 }// namespace ec
