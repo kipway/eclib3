@@ -7,6 +7,7 @@
 * class ec::aio::netserver
 
 * @update
+	2023-6-6  增加可持续fd
     2023-5-21 update for download big http file
     2023-2-08 first version
 
@@ -221,7 +222,7 @@ namespace ec {
 			 * @param fd 虚拟fd
 			 * @param sbuf 消息包
 			 * @param msgtype 消息类型 EC_AIO_MSG_XXX defined in ec_aiosession.h
-			 * @return 
+			 * @return 0:ok; -1:error, will disconnect
 			*/
 			virtual int domessage(int fd, ec::bytes& sbuf, int msgtype) = 0;
 
@@ -242,6 +243,10 @@ namespace ec {
 			virtual void onDisconnect(int kfd) {
 			}
 
+			/**
+			 * @brief 已经删除会话，应用层重载时需要先调用ec::aio::netserver的本函数
+			 * @param fd 会话id(不是系统fd)
+			*/
 			virtual void onDisconnected(int fd)
 			{
 				_plog->add(CLOG_DEFAULT_DBG, "netserver::onDisconnected fd(%d)", fd);

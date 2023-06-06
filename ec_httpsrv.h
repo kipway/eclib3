@@ -3,7 +3,8 @@
 
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020-5-23
+\update 2020-5-30
+  2023-5-30 support multi http root path
   2023-5-23 update http rang download big file
   2023-5-21 support big file download
   2023-5-20 update http range
@@ -23,17 +24,17 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_diskio.h"
 #include "ec_string.h"
 #include "ec_log.h"
-
+#include "ec_map.h"
 #include "ec_netsrv.h"
 #include "ec_http.h"
 
 #ifndef HTTP_RANGE_SIZE
 #if defined(_MEM_TINY) // < 256M
-#define HTTP_RANGE_SIZE (1024 * 20)
-#elif defined(_MEM_SML) // < 1G
 #define HTTP_RANGE_SIZE (1024 * 30)
-#else
+#elif defined(_MEM_SML) // < 1G
 #define HTTP_RANGE_SIZE (1024 * 60)
+#else
+#define HTTP_RANGE_SIZE (1024 * 120)
 #endif
 #endif
 
@@ -44,8 +45,19 @@ namespace ec
 		class httpsrv : public server  // http/https server
 		{
 		public:
+			struct i_root
+			{
+				ec::string _name;//path name, "VIDEO"
+				ec::string _path;// mappped path, The last character is '/'. "/data/vidoes/"
+			};
+			struct keq_rootnode {
+				bool operator()(const char* key, const i_root& val)
+				{
+					return ec::streq(key,val._name.c_str());
+				}
+			};
 			httpsrv(ilog* plog, mimecfg* pmine) : server(plog),
-				_pmine(pmine), _pathhttp{ 0 }
+				_pmine(pmine), _pathhttp{ 0 }, _roots(32)
 			{
 			}
 			void initpath(const char* pathttp)
@@ -53,9 +65,43 @@ namespace ec
 				strlcpy(_pathhttp, pathttp, sizeof(_pathhttp));
 			}
 
+			void addrootpath(const char* sname, const char* spath)
+			{
+				if (!sname || !*sname || !spath || !*spath)
+					return;
+				i_root it;
+				it._name = sname;
+				it._path = spath;
+				ec::formatpath(it._path);
+				_roots.set(sname, std::move(it));
+			}
+			template<class _STR = std::string>
+			bool getRootPath(const char* src, _STR& sout)
+			{
+				char sname[80];
+				ec::fixstring strname(sname, sizeof(sname));
+				while (*src) {
+					if (*src == '/') {
+						i_root* pi = _roots.get(strname.c_str());
+						if (!pi)
+							return false;
+						sout.clear();
+						sout.append(pi->_path.c_str(), pi->_path.size());
+						++src;
+						if(*src)
+							sout.append(src);
+						return true;
+					}
+					else
+						strname.push_back(*src);
+					++src;
+				}
+				return false;
+			}
 		protected:
 			ec::mimecfg* _pmine;
 			char _pathhttp[512];//utf8, http documents root path. The last character is '/'
+			ec::hashmap<const char*, i_root, keq_rootnode> _roots;
 		protected:
 			virtual const char* srvname(uint32_t protoc)
 			{
@@ -70,70 +116,30 @@ namespace ec
 				return "TCP";
 			}
 
-			bool httpreterr(unsigned int ucid, const char* sret, int errcode)
+			/**
+			 * @brief The application layer processes HTTP packets
+			 * @param pkghttp HTTP message
+			 * @return return false will process HTTP message in the default way
+			*/
+			virtual bool doAppHttp(http::package& pkghttp)
 			{
-				int nret = sendbyucid(ucid, sret, strlen(sret));
-				if (_plog) {
-					if (nret >= 0)
-						_plog->add(CLOG_DEFAULT_DBG, "http write ucid(%u): error %d", ucid, errcode);
-					else
-						_plog->add(CLOG_DEFAULT_DBG, "http write ucid(%u) failed.", ucid);
-				}
-				return nret > 0;
+				return false;
 			}
 
-			bool httpwrite_401(uint32_t ucid, http::package* pPkg, const char* html = nullptr, size_t htmlsize = 0, const char* stype = nullptr)
-			{
-				try {
-					bytes vs;
-					vs.reserve(1024 * 4);
-					if (!pPkg->make(&vs, 401, "Unauthorized", stype, "WWW-Authenticate: Basic\r\n", html, htmlsize))
-						return false;
-					return sendbyucid(ucid, vs.data(), vs.size()) >= 0;
-				}
-				catch (...) {
-					if (_plog)
-						_plog->add(CLOG_DEFAULT_ERR, "ucid(%u) httpwrite_401 exception", ucid);
-					return false;
-				}
-			}
-
-			bool httpwrite(uint32_t ucid, http::package* pPkg, const char* html, size_t size, const char* stype)
-			{
-				bytes vs;
-				vs.reserve(1024 * 16);
-				str128 content_type;
-				bool bzip = true;
-				if (stype && *stype) {
-					_pmine->getmime(stype, content_type);
-					bzip = !http::iszipfile(stype);
-				}
-				if (!pPkg->make(&vs, 200, "ok", content_type.c_str(), "Accept-Ranges: bytes\r\n", html, size, bzip))
-					return false;
-				return sendbyucid(ucid, vs.data(), vs.size()) >= 0;
-			}
-
-			bool httpwrite(uint32_t ucid, int status, const char* statusmsg, const char* shead,
-				const void* pbody = nullptr, size_t sizebody = 0)
+			/**
+			 * @brief
+			 * @param statuscode  like 200 ,206, 404
+			 * @param statusinfo  "OK"
+			 * @param sContentType like "text/html"
+			 * @return 
+			*/
+			bool httpwrite(uint32_t ucid, http::package* pPkg, int statuscode, const char* statusinfo,
+				const char* body, size_t sizebody, const char* sContentType, bool bzip = true)
 			{
 				bytes vs;
 				vs.reserve(1024 + sizebody);
-
-				str1k stmp;
-				if (!stmp.format("HTTP/1.1 %d %s\r\n", status, statusmsg))
+				if (!pPkg->make(&vs, statuscode, statusinfo, sContentType, "Accept-Ranges: bytes\r\n", body, sizebody, bzip))
 					return false;
-				vs.append(stmp);
-				vs.append("Connection: keep-alive\r\n");
-				if (shead && *shead)
-					vs.append(shead);
-				if (pbody && sizebody) {
-					if (!stmp.format("Content-Length: %zu\r\n\r\n", sizebody))
-						return false;
-					vs.append(stmp);
-					vs.append(pbody, sizebody);
-				}
-				else
-					vs.append("\r\n");
 				return sendbyucid(ucid, vs.data(), vs.size()) >= 0;
 			}
 
@@ -176,8 +182,7 @@ namespace ec
 				str1k tmp;
 				long long flen = ec::io::filesize(sfile);
 				if (flen < 0) {
-					httpreterr(ucid, http_sret404, 404);
-					return pPkg->HasKeepAlive();
+					return httpwrite(ucid, pPkg, 404, "not found!", html_404, strlen(html_404), "text/html");
 				}
 				ec::string answer;
 				answer.reserve(1024 * 4);
@@ -200,8 +205,7 @@ namespace ec
 			{
 				ec::string data;
 				if (!ec::io::lckread(sfile, &data) || !data.size()) {
-					httpreterr(ucid, ec::http_sret404, 404);
-					return pPkg->HasKeepAlive();
+					return httpwrite(ucid, pPkg, 404, "not found!", html_404, strlen(html_404), "text/html");
 				}
 				ec::net::session* ps = get_session(ucid);
 				if (!ps)
@@ -209,7 +213,13 @@ namespace ec
 				if (ps->hasSendJob())
 					ps->setHttpDownFile(nullptr, 0, 0); //reset clear job
 				const char* sext = ec::http::file_extname(sfile);
-				return httpwrite(ucid, pPkg, data.data(), data.size(), sext);
+				str128 content_type;
+				bool bzip = true;
+				if (sext && *sext) {
+					_pmine->getmime(sext, content_type);
+					bzip = !http::iszipfile(sext);
+				}
+				return httpwrite(ucid, pPkg, 200, "ok", data.data(), data.size(), content_type.c_str(), bzip);
 			}
 
 			bool downbigfile(uint32_t ucid, http::package* pPkg, const char* sfile, long long filelen)
@@ -230,8 +240,7 @@ namespace ec
 					data += "Content-type: application/octet-stream\r\n";
 				data.append("Content-Length: ").append(ec::to_string(filelen)).append("\r\n\r\n");
 				if (!ec::io::lckread(sfile, &data, 0, HTTP_RANGE_SIZE, filelen)) {
-					httpreterr(ucid, ec::http_sret404, 404);
-					return true;
+					return httpwrite(ucid, pPkg, 404, "not found!", html_404, strlen(html_404), "text/html");
 				}
 				if (_plog)
 					_plog->add(CLOG_DEFAULT_DBG, "ucid(%u) http down file '%s', Content-Length=%lld",
@@ -278,8 +287,7 @@ namespace ec
 				answer += tmp;
 				int64_t lread = sizeContent > HTTP_RANGE_SIZE ? HTTP_RANGE_SIZE : sizeContent;
 				if (!io::lckread(sfile, &answer, lpos, lread, lfilesize)) {
-					httpreterr(ucid, ec::http_sret404, 404);
-					return pPkg->HasKeepAlive();
+					return httpwrite(ucid, pPkg, 404, "not found!", html_404, strlen(html_404), "text/html");
 				}
 				if (_plog)
 					_plog->add(CLOG_DEFAULT_DBG, "ucid(%u) http down file '%s', Content-Length=%jd rang %jd-%jd/%jd", 
@@ -310,27 +318,30 @@ namespace ec
 				http::package http;
 				if (http.parse(((const char*)pkg), pkgsize) <= 0)
 					return false;
+				if (doAppHttp(http))
+					return true;
 
 				loghttpstartline(CLOG_DEFAULT_DBG, ucid, (const char*)pkg, pkgsize);
 				loghttphead(CLOG_DEFAULT_ALL, "head", _plog, &http);
-				if (!http.ismethod("GET") && !http.ismethod("HEAD")) { // only support GET
-					httpreterr(ucid, ec::http_sret400, 400);
-					return http.HasKeepAlive();
+				if (!http.ismethod("GET") && !http.ismethod("HEAD")) { // only support GET and HEAD
+					return httpwrite(ucid, &http, 400, "Bad Request!", html_400, strlen(html_400), "text/html");
 				}
-
-				ec::str1k sfile, utf8;
+				ec::str1k sfile, utf8, pathmaproot;
 				if (!http.GetUrl(sfile))
 					return false;
 				url2utf8(sfile.c_str(), utf8);
 				if (utf8.size() < 1)
 					return false;
 				if (utf8[0] == '.' || (utf8.size() > 1 && utf8[1] == '.')) {
-					httpreterr(ucid, ec::http_sret404, 404);
-					return http.HasKeepAlive();
+					return httpwrite(ucid, &http, 404, "not found!", html_400, strlen(html_400), "text/html");
 				}
 				sfile = _pathhttp;
-				if (utf8[0] == '/')
-					sfile.append(utf8.data() + 1, utf8.size() - 1);
+				if (utf8[0] == '/') {
+					if (getRootPath(utf8.c_str() + 1, pathmaproot))
+						sfile = pathmaproot.c_str();
+					else
+						sfile.append(utf8.data() + 1, utf8.size() - 1);
+				}
 				else
 					sfile.append(utf8.data(), utf8.size());
 				if (sfile.back() == '/')
@@ -343,15 +354,13 @@ namespace ec
 
 				long long flen = ec::io::filesize(sfile.c_str());
 				if (flen < 0) {
-					httpreterr(ucid, ec::http_sret404, 404);
-					return http.HasKeepAlive();
+					return httpwrite(ucid, &http, 404, "not found!", html_400, strlen(html_400), "text/html");
 				}
 				utf8.clear();
 				if (http.GetHeadFiled("Range", utf8)) { // "Range: bytes=0-1023" or "Range: bytes=0-"
 					int64_t rangpos = 0, rangposend = 0;
 					if (!parserange(utf8.data(), utf8.size(), rangpos, rangposend)) {
-						httpreterr(ucid, ec::http_sret413, 413);
-						return http.HasKeepAlive();
+						return httpwrite(ucid, &http, 413, "Request Entity Too Large!", html_413, strlen(html_413), "text/html");
 					}
 					if (rangposend <= 0)
 						rangposend = flen - 1;

@@ -836,8 +836,7 @@ namespace ec
 			_buf[0] = 0;
 		}
 		~fixstring_() {
-			if (_buf && _size < _bufsize)
-				_buf[_size] = 0;
+			endstr();
 		}
 		inline iterator begin() noexcept
 		{
@@ -891,13 +890,33 @@ namespace ec
 		{
 			return (pos < _bufsize) ? _buf[pos] : _buf[0];
 		}
-
+		inline reference back() noexcept
+		{
+			if (!_size)
+				return _buf[0];
+			return _buf[_size - 1];
+		}
+		const_reference back() const noexcept
+		{
+			if (!_size)
+				return _buf[0];
+			return _buf[_size - 1];
+		}
 	public: //Modifiers
 		fixstring_& append(const_pointer s, size_t n)
 		{
 			if (_size + (uint32_t)n < capacity()) {
 				memcpy(_buf + _size, s, n);
 				_size += (uint32_t)n;
+			}
+			return *this;
+		}
+		fixstring_& append(const char* s)
+		{
+			size_t zn = strlen(s);
+			if (_size + (uint32_t)zn < capacity()) {
+				memcpy(_buf + _size, s, zn);
+				_size += (uint32_t)zn;
 			}
 			return *this;
 		}
@@ -924,8 +943,12 @@ namespace ec
 		{
 			return _buf;
 		}
-		inline void endstr() const noexcept
+		inline void endstr() noexcept
 		{
+			if (!_buf || !_bufsize)
+				return;
+			if (_size >= _bufsize)
+				_size = _bufsize - 1;
 			_buf[_size] = 0;
 		}
 	};

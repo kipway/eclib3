@@ -2,7 +2,8 @@
 \file ec_http.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.5.18
+\update 2023.5.30
+2023.5.30 update mimecfg
 2023.5.13 use zlibe self memory allocator
 classes for HTTP protocol parse
 
@@ -24,8 +25,8 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_config.h"
 #include "ec_map.h"
 
-#ifndef MAXSIZE_HTTPBODY
-#define MAXSIZE_HTTPBODY (1024 * 1024)
+#ifndef MAXSIZE_RCVHTTPBODY
+#define MAXSIZE_RCVHTTPBODY (1024 * 1024)
 #endif
 
 namespace ec
@@ -36,12 +37,9 @@ namespace ec
 		he_failed
 	};
 
-	constexpr const char* http_sret404 = "HTTP/1.1 404  not found!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:60\r\n\r\n"\
-		"<!DOCTYPE html><html><body><p>404 not fund</p></body></html>";
-	constexpr const char* http_sret400 = "HTTP/1.1 400  Bad Request!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:63\r\n\r\n"\
-		"<!DOCTYPE html><html><body><p>400 Bad Request</p></body></html>";
-	constexpr const char* http_sret413 = "HTTP/1.1 413  Payload Too Large!\r\nConnection:keep-alive\r\nContent-type:text/html\r\nContent-Length:76\r\n\r\n"\
-		"<!DOCTYPE html><html><body><p>413 Request Entity Too Large</p></body></html>";
+	constexpr const char* html_404 = "<!DOCTYPE html><html><body><p>404 not fund</p></body></html>";
+	constexpr const char* html_400 = "<!DOCTYPE html><html><body><p>400 Bad Request</p></body></html>";
+	constexpr const char* html_413 = "<!DOCTYPE html><html><body><p>413 Request Entity Too Large</p></body></html>";
 
 	/*!
 	\brief mimecfg config
@@ -62,7 +60,7 @@ namespace ec
 		struct t_keq_mine {
 			bool operator()(const char* key, const t_mime& val)
 			{
-				return ec::streq(key, val.sext);
+				return ec::strieq(key, val.sext);
 			}
 		};
 		mimecfg(const mimecfg&) = delete;
@@ -75,7 +73,7 @@ namespace ec
 			_mime.clear();
 		};
 	public:
-		hashmap<const char*, t_mime, t_keq_mine> _mime;
+		hashmap<const char*, t_mime, t_keq_mine, ec::del_mapnode<t_mime>, ec::hash_istr> _mime;
 	public:
 		template<class _Str>
 		bool getmime(const char* sext, _Str& so) noexcept
@@ -563,7 +561,7 @@ namespace ec
 						_head.push_back(i);
 						if (i._key.ieq("Content-Length")) {
 							int len = i._val.stoi();
-							if (len < 0 || len > MAXSIZE_HTTPBODY)
+							if (len < 0 || len > MAXSIZE_RCVHTTPBODY)
 								return e_bodysize;
 							_body._size = (size_t)len;
 						}

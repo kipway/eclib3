@@ -3,6 +3,7 @@
 * base net server class use IOCP for windows
 * @author jiangyong
 * @update
+	2023-6-6  增加可持续fd, update closefd() 可选通知
     2023-5-21 for http download big file
 *
 * eclib 3.0 Copyright (c) 2017-2023, kipway
@@ -16,6 +17,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include <mswsock.h>
 
 #include "ec_memory.h"
+#include "ec_diskio.h"
 #include "ec_log.h"
 #include "ec_map.h"
 #include "ec_aiosession.h"
@@ -140,6 +142,8 @@ namespace ec {
 			HANDLE _hiocp;
 			ec::hashmap<int, t_fd, keq_fd> _mapfd;
 			int _nextfd; // from 1-INT32_MAX
+			std::string _sfdfile;
+
 			int nextfd()
 			{
 				if (_mapfd.size() >= SIZE_MAX_FD)
@@ -149,7 +153,37 @@ namespace ec {
 					if (_nextfd == INT32_MAX)
 						_nextfd = 1;
 				} while (_mapfd.has(_nextfd));
+				if (!_sfdfile.empty()) {
+					FILE* pf = ec::io::fopen(_sfdfile.c_str(), "wt");
+					if (pf) {
+						char sid[40] = { 0 };
+						snprintf(sid, sizeof(sid), "%d", _nextfd);
+						fwrite(sid, 1, strlen(sid), pf);
+						fclose(pf);
+					}
+				}
 				return _nextfd;
+			}
+			
+		public:
+			void SetFdFile(const char* sfile)
+			{
+				if (!sfile || !*sfile) {
+					_sfdfile.reserve(200);
+					ec::io::getexepath(_sfdfile);
+					_sfdfile.append("EcNetVfd.txt");
+				}
+				else
+					_sfdfile = sfile;
+				FILE* pf = ec::io::fopen(_sfdfile.c_str(), "rt");
+				if (pf) {
+					char sid[40] = { 0 };
+					fread(sid, 1, sizeof(sid) - 1u, pf);
+					fclose(pf);
+					_nextfd = atoi(sid);
+					if (_nextfd < 0)
+						_nextfd = 0;
+				}
 			}
 		protected:
 			/**
@@ -334,7 +368,6 @@ namespace ec {
 			*/
 			int close()
 			{
-				_closeflag = 1;
 				for (auto& i : _mapfd) {//先关闭所有socket
 					if (fd_tcp == i.fdtype || fd_tcpout == i.fdtype || fd_udp == i.fdtype)
 						shutdown(i.sysfd, SD_BOTH);
@@ -431,7 +464,7 @@ namespace ec {
 					return -1;
 
 				int64_t curmstime = ec::mstime();
-				if (curmstime - _lastmstime >= 5) { //5毫秒任务
+				if (llabs(curmstime - _lastmstime) >= 5) { //5毫秒任务
 					dorecvflowctrl();//流控处理
 					doaysnconnectout();//连出处理
 					_lastmstime = curmstime;
@@ -532,14 +565,13 @@ namespace ec {
 			 * @brief 主动关闭连接，会产生onDisconnected调用
 			 * @param kfd  keyfd
 			*/
-			void closefd(int kfd)
+			void closefd(int kfd, bool bnotify = true)
 			{
-				if (!_closeflag)
+				if (bnotify)
 					onDisconnect(kfd);
 				if (close_(kfd) < 0)
 					return;
-				if (!_closeflag)
-					onDisconnected(kfd);
+				onDisconnected(kfd);
 			}
 
 			size_t size_fds()
@@ -549,7 +581,6 @@ namespace ec {
 
 		private:
 			int64_t _lastmstime = 0;//上次扫描可发送的时间，单位GMT毫秒
-			int _closeflag = 0;//关闭时用，1:禁止通知断开
 			LPFN_ACCEPTEX _lpfnAcceptEx = nullptr;
 			GUID _GuidAcceptEx = WSAID_ACCEPTEX;
 			struct t_readflow {
@@ -1152,12 +1183,19 @@ namespace ec {
 						return -1;
 					}
 				}
-
+#ifdef _MEM_TINY
+				int nbufsize = 512 * 1024;
+#else
 				int nbufsize = 2 * 1024 * 1024;
+#endif
 				if (setsockopt(t.sysfd, SOL_SOCKET, SO_SNDBUF, (char*)&nbufsize, (socklen_t)sizeof(nbufsize)) < 0) {
 					_plog->add(CLOG_DEFAULT_ERR, "UDP fd(%d) set SO_SNDBUF error %d. ", t.kfd, WSAGetLastError());
 				}
+#ifdef _MEM_TINY
+				nbufsize = 512 * 1024;
+#else
 				nbufsize = 1024 * 1024;
+#endif
 				if (setsockopt(t.sysfd, SOL_SOCKET, SO_RCVBUF, (char*)&nbufsize, (socklen_t)sizeof(nbufsize)) < 0) {
 					_plog->add(CLOG_DEFAULT_ERR, "UDP fd(%d) set SO_RCVBUF error %d. ", t.kfd, WSAGetLastError());
 				}

@@ -5,6 +5,7 @@
 
 \author jiangyong
 
+\update 2023-6-6  增加可持续fd
 \update 2023-2-1  增加TCP ipv6支持
 \update 2022-11-9 适配ec_aiosrv.h
 \update 2022-2-12 删除sctp,fd改为增长至增加INT32_MAX然后回到1
@@ -31,6 +32,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_netio.h"
 #include "ec_jsonx.h"
 #include "ec_vector.hpp"
+#include "ec_diskio.h"
 #ifndef SIZE_MAX_FD
 #define SIZE_MAX_FD  16384 //最大fd连接数
 #endif
@@ -66,6 +68,7 @@ private:
 	int _nextfd;
 	int _sizercvbuf, _sizesndbuf; // kbytes
 	ec::hashmap<int, t_fd, keq_fd> _mapfd;
+	std::string _sfdfile;
 
 	int nextfd()
 	{
@@ -76,6 +79,15 @@ private:
 			if (_nextfd == INT32_MAX)
 				_nextfd = 1;
 		} while (_mapfd.has(_nextfd));
+		if (!_sfdfile.empty()) {
+			FILE* pf = ec::io::fopen(_sfdfile.c_str(), "wt");
+			if (pf) {
+				char sid[40] = { 0 };
+				snprintf(sid, sizeof(sid), "%d", _nextfd);
+				fwrite(sid, 1, strlen(sid), pf);
+				fclose(pf);
+			}
+		}
 		return _nextfd;
 	}
 
@@ -99,6 +111,25 @@ private:
 	}
 
 public:
+	void SetFdFile(const char* sfile)
+	{
+		if (!sfile || !*sfile) {
+			_sfdfile.reserve(200);
+			ec::io::getexepath(_sfdfile);
+			_sfdfile.append("EcNetVfd.txt");
+		}
+		else
+			_sfdfile = sfile;
+		FILE* pf = ec::io::fopen(_sfdfile.c_str(), "rt");
+		if (pf) {
+			char sid[40] = { 0 };
+			fread(sid, 1, sizeof(sid) - 1u, pf);
+			fclose(pf);
+			_nextfd = atoi(sid);
+			if (_nextfd < 0)
+				_nextfd = 0;
+		}
+	}
 	inline int geterrno() {
 		return errno;
 	}

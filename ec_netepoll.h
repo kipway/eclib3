@@ -4,6 +4,7 @@
 * 
 * @author jiangyong
 * @update
+	2023-6-6  增加可持续fd, update closefd() 可选通知
     2023-5-21 update for download big http file
     2023-5.13 remove ec::memory
     2023-2-09 first version
@@ -160,7 +161,9 @@ namespace ec {
 			virtual ~serverepoll_() {
 
 			}
-
+			inline void SetFdFile(const char* sfile) {
+				_net.SetFdFile(sfile);
+			}
 			//create epoll, return 0:ok; -1:error
 			int open()
 			{
@@ -187,7 +190,6 @@ namespace ec {
 				_net.getall(fds);
 
 				int fdtype = 0;
-				_closeflag = 1;
 				for (auto& i : fds) {
 					fdtype = _net.getfdtype(i);
 					if (fdtype >= 0 && fdtype != _net.fd_epoll) { //fd除epoll外全部关闭
@@ -273,7 +275,7 @@ namespace ec {
 					return;
 
 				int64_t curmstime = ec::mstime();
-				if (curmstime - _lastmstime >= 5) { //5毫秒处理一次接收流控
+				if (llabs(curmstime - _lastmstime) >= 5) { //5毫秒处理一次接收流控
 					dorecvflowctrl();
 					_lastmstime = curmstime;
 				}
@@ -337,15 +339,14 @@ namespace ec {
 			 * @brief 主动关闭连接，会产生onClosed调用
 			 * @param kfd keyfd
 			*/
-			void closefd(int kfd)
+			void closefd(int kfd, bool bnotify = true)
 			{
-				if (!_closeflag)
+				if (bnotify)
 					onDisconnect(kfd);
 				// Since Linux 2.6.9, event can be specified as NULL when using EPOLL_CTL_DEL
 				_net.epoll_ctl_(_fdepoll, EPOLL_CTL_DEL, kfd, nullptr);
 				_net.close_(kfd);
-				if (!_closeflag)
-					onDisconnected(kfd);
+				onDisconnected(kfd);
 			}
 
 			size_t size_fds()
@@ -359,7 +360,6 @@ namespace ec {
 			}
 		private:
 			int64_t _lastmstime = 0;//上次扫描可发送的时间，单位GMT毫秒
-			int _closeflag = 0;//关闭时用，1:禁止通知断开
 			void dorecvflowctrl()//接收流控
 			{
 				for (auto& i : _net.getmap()) {

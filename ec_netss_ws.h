@@ -131,8 +131,8 @@ namespace ec
 					if (atoi(sVersion) != 13) {
 						if (_pwslog)
 							_pwslog->add(CLOG_DEFAULT_MOR, "ws sVersion(%s) error :ucid=%d, ", sVersion, _ucid);
-						ws_send(http_sret400, strlen(http_sret400));
-						return pPkg->HasKeepAlive();
+						const char* sreterr_400 = "http/1.1 400  Bad Request!\r\nConnection:keep-alive\r\n\r\n";
+						return ws_send(sreterr_400, strlen(sreterr_400)) >= 0;
 					}
 					ec::string vret;
 
