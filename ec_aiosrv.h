@@ -7,6 +7,7 @@
 * class ec::aio::netserver
 
 * @update
+	2023-6-7 fix netserver::tcpconnect(uint16_t port, const char* sip) connect localhost failed in windows while sip==nul
 	2023-6-6  增加可持续fd
     2023-5-21 update for download big http file
     2023-2-08 first version
@@ -186,6 +187,8 @@ namespace ec {
 			int tcpconnect(uint16_t port, const char* sip)
 			{
 				ec::net::socketaddr netaddr;
+				if (!sip || !*sip)
+					sip = "127.0.0.1";
 				if (netaddr.set(port, sip) < 0)
 					return -1;
 				int addrlen = 0;
