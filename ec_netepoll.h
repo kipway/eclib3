@@ -4,6 +4,7 @@
 * 
 * @author jiangyong
 * @update
+	2023-6-15 add tcp keepalive
 	2023-6-6  增加可持续fd, update closefd() 可选通知
     2023-5-21 update for download big http file
     2023-5.13 remove ec::memory
@@ -109,6 +110,8 @@ namespace ec {
 			 * @return nullptr or psession
 			*/
 			virtual psession getSession(int kfd) = 0;
+
+			virtual void onSendtoFailed(int fd, const struct sockaddr* paddr, int addrlen, const void* pdata, size_t datasize, int errcode) {};
 		protected:
 			inline int setsendbuf(int fd, int n)
 			{
@@ -154,6 +157,10 @@ namespace ec {
 				return 0;
 			}
 
+			inline bool setkeepalive(int fd, bool bfast = false)
+			{
+				return _net.setkeepalive(fd, bfast) >= 0;
+			}
 		public:
 			serverepoll_(ec::ilog* plog) : _plog(plog), _fdepoll(-1), _lastwaiterr(-100)
 			{
@@ -405,47 +412,51 @@ namespace ec {
 					auto& frm = pfrms->front();
 					if (!frm.empty()) {
 						if (_net.sendto_(kfd, frm.data(), frm.size(), frm.getnetaddr(), frm.netaddrlen()) < 0) {
-							if (EAGAIN != errno) {
-								ec::net::socketaddr peeraddr;
-								peeraddr.set(frm.getnetaddr(), frm.netaddrlen());
-								_plog->add(CLOG_DEFAULT_DBG, "fd(%d) sento %s:%u error %d.", kfd,
-									peeraddr.viewip(), peeraddr.port(), errno);
-							}
-							break;
+							if(numsnd)
+								pss->onUdpSendCount(numsnd, nbytes);
+							if (EAGAIN != errno)
+								onSendtoFailed(kfd, frm.getnetaddr(), frm.netaddrlen(), frm.data(), frm.size(), errno);
+							pfrms->pop();
+							return;
 						}
-						if (_plog->getlevel() == CLOG_DEFAULT_ALL) {
+#ifdef _DEBUG
+						if (_plog->getlevel() >= CLOG_DEFAULT_ALL) {
 							ec::net::socketaddr peeraddr;
 							peeraddr.set(frm.getnetaddr(), frm.netaddrlen());
 							_plog->add(CLOG_DEFAULT_ALL, "fd(%d) sento %s:%u %zu bytes.", kfd,
 								peeraddr.viewip(), peeraddr.port(), frm.size());
 						}
+#endif
 						nbytes += (int)frm.size();
 					}
 					pfrms->pop();
 					numsnd++;
 				} while (!pfrms->empty() && numsnd < 16 && nbytes < 1024 * 32);
+				pss->onUdpSendCount(numsnd, nbytes);
 			}
 
 			char udpbuf_[1024 * 64] = { 0 };
 			void onudpevent(struct epoll_event& evt)
 			{
 				if (evt.events & EPOLLIN) {
-					int nr = -1, ndo = 128;
+					int nr = -1, ndo = 64;
 					socklen_t* paddrlen = nullptr;
 					ec::net::socketaddr addr;
 					struct sockaddr* paddr = addr.getbuffer(&paddrlen);
 					do {
 						nr = _net.recvfrom_(evt.data.fd, udpbuf_, (int)sizeof(udpbuf_), 0, paddr, paddrlen);
 						if (nr > 0) {
-							if (_plog->getlevel() == CLOG_DEFAULT_ALL) {
+#ifdef _DEBUG
+							if (_plog->getlevel() >= CLOG_DEFAULT_ALL) {
 								_plog->add(CLOG_DEFAULT_ALL, "fd(%d) recvfrom %s:%u %d bytes.", evt.data.fd,
 									addr.viewip(), addr.port(), nr);
 							}
+#endif
 							if (onReceivedFrom(evt.data.fd, udpbuf_, nr, paddr, *paddrlen) < 0)
 								break;
 						}
 						else if (nr < 0 && EAGAIN != errno) {
-							_plog->add(CLOG_DEFAULT_ALL, "fd(%d) recvfrom failed. error %d", evt.data.fd, errno);
+							_plog->add(CLOG_DEFAULT_ERR, "fd(%d) recvfrom failed. error %d", evt.data.fd, errno);
 						}
 						--ndo;
 					} while (nr > 0 && ndo > 0);
@@ -468,7 +479,9 @@ namespace ec {
 					return;
 				}
 				if ((evt.events & EPOLLIN) && _net.fd_listen == nfdtype) {
+#ifdef _DEBUG
 					_plog->add(CLOG_DEFAULT_ALL, "listen fd(%d)  EPOLLIN, events %08XH", evt.data.fd, evt.events);
+#endif
 					ec::net::socketaddr clientaddr;
 					socklen_t* paddrlen = nullptr;
 					struct sockaddr* paddr = clientaddr.getbuffer(&paddrlen);
@@ -507,7 +520,9 @@ namespace ec {
 								closefd(evt.data.fd);
 								return;
 							}
+#ifdef _DEBUG
 							_plog->add(CLOG_DEFAULT_ALL, "fd(%d) received %d bytes", evt.data.fd, nr);
+#endif
 							if (onReceived(evt.data.fd, _recvtmp, nr) < 0) {
 								closefd(evt.data.fd);
 								return;
@@ -521,7 +536,9 @@ namespace ec {
 					return;
 				}
 				if (evt.events & EPOLLOUT) {
+#ifdef _DEBUG
 					_plog->add(CLOG_DEFAULT_ALL, "fd(%d)  EPOLLOUT, events %08XH", evt.data.fd, evt.events);
+#endif
 					if (onepollout(evt.data.fd) < 0)
 						return;
 				}
@@ -581,7 +598,9 @@ namespace ec {
 				pd = pss->_sndbuf.get(zlen);
 				while (pd && zlen) {
 					ns = _net.send_(fd, pd, (int)(zlen), 0);
+#ifdef _DEBUG
 					_plog->add(CLOG_DEFAULT_ALL, "sendbuf fd(%d) size %d", fd, ns);
+#endif
 					if (ns < 0) {
 						int nerr = _net.geterrno();
 						if (nerr != EAGAIN)

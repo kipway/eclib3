@@ -306,7 +306,9 @@ namespace ec {
 				if (doAppHttp(http))
 					return true;
 				loghttpstartline(CLOG_DEFAULT_DBG, fd, (const char*)pkg, pkgsize);
+#ifdef _DEBUG
 				loghttphead(CLOG_DEFAULT_ALL, "head", _plog, &http);
+#endif
 				if (!http.ismethod("GET") && !http.ismethod("HEAD")) { // only support GET
 					return httpwrite(fd, &http, 400, "Bad Request", html_400, strlen(html_400), "text/html");
 				}

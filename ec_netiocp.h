@@ -3,6 +3,7 @@
 * base net server class use IOCP for windows
 * @author jiangyong
 * @update
+	2023-6-15 add tcp keepalive
 	2023-6-6  增加可持续fd, update closefd() 可选通知
     2023-5-21 for http download big file
 *
@@ -252,6 +253,8 @@ namespace ec {
 			 * @return nullptr or psession
 			*/
 			virtual psession getSession(int kfd) = 0;
+
+			virtual void onSendtoFailed(int fd, const struct sockaddr* paddr, int addrlen, const void* pdata, size_t datasize, int errcode) {};
 		protected:
 			int setsendbuf(int fd, int n)
 			{
@@ -330,6 +333,38 @@ namespace ec {
 				_mapfd.erase(kfd);
 				return 0;
 			}
+
+			bool setkeepalive(int kfd, bool bfast = false)
+			{
+				t_fd* p = _mapfd.get(kfd);
+				if (!p)
+					return false;
+
+				BOOL bKeepAlive = 1;
+				int nRet = setsockopt(p->sysfd, SOL_SOCKET, SO_KEEPALIVE,
+					(char*)&bKeepAlive, sizeof(bKeepAlive));
+				if (nRet == SOCKET_ERROR)
+					return false;
+				tcp_keepalive alive_in;
+				tcp_keepalive alive_out;
+				if (bfast) {
+					alive_in.keepalivetime = 5 * 1000;
+					alive_in.keepaliveinterval = 1000;
+				}
+				else {
+					alive_in.keepalivetime = 30 * 1000;
+					alive_in.keepaliveinterval = 5000;
+				}
+				alive_in.onoff = 1;
+				unsigned long ulBytesReturn = 0;
+
+				nRet = WSAIoctl(p->sysfd, SIO_KEEPALIVE_VALS, &alive_in, sizeof(alive_in),
+					&alive_out, sizeof(alive_out), &ulBytesReturn, NULL, NULL);
+				if (nRet == SOCKET_ERROR)
+					return false;
+				return true;
+			}
+
 		public:
 			serveriocp_(ec::ilog* plog) : _plog(plog), _hiocp(nullptr), _nextfd(0)
 			{
@@ -433,7 +468,7 @@ namespace ec {
 				int fdl = create_udp(paddr, addrlen, tf);
 
 				if (fdl < 0) {
-					_plog->add(CLOG_DEFAULT_ERR, "bind udp %s:%u failed.", (sip && *sip) ? sip : "0.0.0.0", port);
+					_plog->add(CLOG_DEFAULT_ERR, "bind udp %s:%u failed.", netaddr.viewip(), port);
 					return -1;
 				}
 
@@ -449,7 +484,7 @@ namespace ec {
 					close_(tf.kfd);
 					return -1;
 				}
-				_plog->add(CLOG_DEFAULT_MSG, "fd(%d) bind udp://%s:%u success.", fdl, (sip && *sip) ? sip : "0.0.0.0", port);
+				_plog->add(CLOG_DEFAULT_MSG, "fd(%d) bind udp://%s:%u success.", fdl, netaddr.viewip(), port);
 				return fdl;
 			}
 
@@ -663,8 +698,10 @@ namespace ec {
 				pol->optype = optype;
 				pol->kfd = kfd;
 				if (!databufsize) {
+#ifdef _DEBUG
 					_plog->add(CLOG_DEFAULT_ALL, "fd(%d) new overlap post %s overlap. wsbufsize=%zu",
 						pol->kfd, optype2str(pol->optype), pol->wsbufsize);
+#endif
 					return pol;
 				}
 				pol->wsbuf.buf = (char*)ec_malloc(databufsize, &pol->wsbufsize);
@@ -672,15 +709,19 @@ namespace ec {
 					ec_free(pol);
 					return nullptr;
 				}
+#ifdef _DEBUG
 				_plog->add(CLOG_DEFAULT_ALL, "fd(%d) new overlap post %s overlap. wsbufsize=%zu",
 					pol->kfd, optype2str(pol->optype), pol->wsbufsize);
+#endif
 				return pol;
 			}
 
 			void freeoverlap(t_overlap* pol)
 			{
+#ifdef _DEBUG
 				_plog->add(CLOG_DEFAULT_ALL, "fd(%d) free overlap post %s overlap. wsbufsize=%zu, wsbuf.len=%u",
 					pol->kfd, optype2str(pol->optype), pol->wsbufsize, (uint32_t)pol->wsbuf.len);
+#endif
 				if (pol->wsbuf.buf) {
 					ec_free(pol->wsbuf.buf);
 					pol->wsbuf.buf = nullptr;
@@ -822,24 +863,24 @@ namespace ec {
 			/**
 			 * @brief post a send if post_snd == 0
 			 * @param kfd  keyfd
-			 * @return >=0: post bytes;  -1:failed, close fd and call onDisconnected(kfd)
+			 * @return >=0: post bytes;
 			*/
 			int postsendto_(int kfd)
 			{
-				int nsend = 0, ndo = 0;
+				int nsend = 0, nsndFrms = 0;
 				do {
 					t_fd* pfd;
 					if (nullptr == (pfd = _mapfd.get(kfd)) || pfd->fdtype != fd_udp)
 						return -1;
 					if (pfd->post_snd >= EC_AIO_UDP_NUMOVL)
-						return nsend;
+						break;
 
 					psession pss = getSession(kfd);
 					if (!pss)
-						return nsend;
+						break;
 					udb_buffer_* pfrms = pss->getudpsndbuffer();
 					if (!pfrms || pfrms->empty())
-						return nsend;
+						break;
 
 					auto& frm = pfrms->front();
 					t_overlap* pol = newoverlap(frm.size(), op_sendto, kfd);
@@ -854,15 +895,18 @@ namespace ec {
 					if (SOCKET_ERROR == nret) {
 						int nerr = WSAGetLastError();
 						if (WSA_IO_PENDING != nerr) {
-							_plog->add(CLOG_DEFAULT_ERR, "fd(%d) WSASendTo failed with error: %d.", kfd, nerr);
-							closefd(kfd);
+							onSendtoFailed(kfd, pol->inaddr.addr(), pol->inaddr.addrlen(), pol->wsbuf.buf, (size_t)pol->wsbuf.len, nerr);
 							freeoverlap(pol);
-							return -1;
 						}
+						break;
 					}
 					pfd->post_snd += 1;
 					nsend += (int)pol->wsbuf.len;
+					nsndFrms++;
 				} while (nsend < 1024 * 32);
+				psession pss = getSession(kfd);
+				if (pss)
+					pss->onUdpSendCount(nsndFrms, nsend);
 				return nsend;
 			}
 
@@ -950,7 +994,9 @@ namespace ec {
 					}
 				}
 				else {
+#ifdef _DEBUG
 					_plog->add(CLOG_DEFAULT_ALL, "fd(%d) recv %u bytes.", pol->kfd, dwBytes);
+#endif
 					if (onReceived(pol->kfd, pol->wsbuf.buf, dwBytes) < 0) {
 						closefd(pol->kfd);
 						return -1;
@@ -980,7 +1026,9 @@ namespace ec {
 					_plog->add(CLOG_DEFAULT_INF, "fd(%d) read 0bytes at op_readfrom. GetLastError:%u", pol->kfd, GetLastError());
 				}
 				else {
+#ifdef _DEBUG
 					_plog->add(CLOG_DEFAULT_ALL, "fd(%d) read %u bytes at op_readfrom.", pol->kfd, dwBytes);
+#endif
 					onReceivedFrom(pol->kfd, pol->wsbuf.buf, dwBytes, pol->inaddr.addr(), pol->inaddr.addrlen());
 				}
 				t_fd* pfd = _mapfd.get(pol->kfd);
@@ -1002,7 +1050,9 @@ namespace ec {
 					}
 					return 0;
 				}
+#ifdef _DEBUG
 				_plog->add(CLOG_DEFAULT_ALL, "fd(%d) op_write completed size %u.", pol->kfd, dwBytes);
+#endif
 				t_fd* pfd;
 				if (nullptr != (pfd = _mapfd.get(pol->kfd))) {
 					if (pfd->post_snd > 0)
@@ -1022,7 +1072,9 @@ namespace ec {
 					}
 					return 0;
 				}
+#ifdef _DEBUG
 				_plog->add(CLOG_DEFAULT_ALL, "fd(%d) op_sendto completed size %u.", pol->kfd, dwBytes);
+#endif
 				t_fd* pfd;
 				if (nullptr != (pfd = _mapfd.get(pol->kfd))) {
 					if (pfd->post_snd > 0)
@@ -1184,9 +1236,9 @@ namespace ec {
 					}
 				}
 #ifdef _MEM_TINY
-				int nbufsize = 512 * 1024;
+				int nbufsize = 128 * 1024;
 #else
-				int nbufsize = 2 * 1024 * 1024;
+				int nbufsize = 256 * 1024;
 #endif
 				if (setsockopt(t.sysfd, SOL_SOCKET, SO_SNDBUF, (char*)&nbufsize, (socklen_t)sizeof(nbufsize)) < 0) {
 					_plog->add(CLOG_DEFAULT_ERR, "UDP fd(%d) set SO_SNDBUF error %d. ", t.kfd, WSAGetLastError());

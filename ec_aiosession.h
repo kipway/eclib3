@@ -25,7 +25,7 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #endif
 
 #ifndef EC_AIO_SNDBUF_BLOCKSIZE
-#define EC_AIO_SNDBUF_BLOCKSIZE (1024 * 32) // 32K
+#define EC_AIO_SNDBUF_BLOCKSIZE (1024 * 64) // 64K
 #endif
 
 #ifndef EC_AIO_SNDBUF_HEAPSIZE
@@ -273,6 +273,7 @@ namespace ec {
 			virtual bool onSendCompleted() { return true; } //return false will disconnected
 			virtual void setHttpDownFile(const char* sfile, long long pos, long long filelen) {};
 			virtual bool hasSendJob() { return false; };
+			virtual void onUdpSendCount(int64_t numfrms, int64_t numbytes) {};
 		};
 
 		typedef session* psession;

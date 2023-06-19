@@ -4,7 +4,7 @@
 实现一个基于udp多通道并行的可靠传输的封装，取名为ucpx;
 
 \author jiangyong
-
+\update 2023-6-12 优化确认和重发
 \update 2023-2-7 增加ipv6支持
 \update 2022-10-28 优化CPU占用
 \update 2022-10-16 优化速度
@@ -24,15 +24,25 @@
 #include "ec_map.h"
 #include "ec_vector.hpp"
 
-#ifndef SIZE_UDPBUF_FRMS
-#define SIZE_UDPBUF_FRMS 512 //udp未确认缓冲大小,单位ucp报文数
+#ifndef SIZE_UDPBUF_UNACKED
+#define SIZE_UDPBUF_UNACKED 512 //udp未确认缓冲大小,单位ucp报文数
 #endif
-#define SIZE_UDPSENDFULL_FRMS (SIZE_UDPBUF_FRMS - 2) //发送缓冲满
+
+#ifndef UNACK_SEQNO_DIFF
+#define UNACK_SEQNO_DIFF 2048 //未确认最大序号差，对端最多堆积报文数。
+#endif
+
+#define MAXSIZE_MTU 1500 //包最大尺寸,用于存储缓冲,MTU必须小于这个大小
 
 #ifndef SIZE_MTU
+#ifdef  _UXB_IPV6
+#define SIZE_MTU 1280u
+#else
 #define SIZE_MTU 1492u
 #endif
-#define SIZE_UDPFRM (SIZE_MTU - 28u) //报文最大长度,1492(mtu_size) - 20(ipv4_head)-8(udp_head), test use "ping baidu.com -l 1464 -f" , icmp头和udp头长度相同 = 8
+#endif
+
+#define SIZE_UDPFRM (SIZE_MTU - 48u) //报文最大长度, 40(ipv6_head)-8(udp_head)
 
 #ifdef SEQNO_32
 using seqno_t = uint32_t;
@@ -42,6 +52,8 @@ using seqno_t = uint64_t;
 #define SIZE_UCPHEAD 20u //报头大小，64位seqno为20Bytes
 #endif
 #define SIZE_UDPCONTENT (SIZE_UDPFRM - SIZE_UCPHEAD)
+
+#define ERROR_SEQNO ((seqno_t)-1)
 
 #define FRMCMD_HRT  20 //心跳包
 #define FRMCMD_SYN  21 //请求连接,客户端发送
@@ -111,7 +123,7 @@ namespace ec {
 				int64_t  _mstime;//接收或者发送的时标,自1970-1-1的毫秒数,只有发送才会填写用于重发，接受缓冲区始终填写0
 				t_node* _pprior;
 				t_node* _pnext;
-				uint8_t _frm[SIZE_UDPFRM]; //报文存储区,报文是已经编码完成的。
+				uint8_t _frm[MAXSIZE_MTU]; //报文存储区,报文是已经编码完成的。
 				_USE_EC_OBJ_ALLOCATOR
 			};
 			using PNODE = t_node*;
@@ -143,6 +155,17 @@ namespace ec {
 				return _size;
 			}
 
+			/**
+			 * @brief 尾首序号差
+			 * @return 返回序号差，用于判断是否继续发送.
+			*/
+			int diffno()
+			{
+				if (!_phead || !_ptail)
+					return 0;
+				return static_cast<int>(_ptail->_seqno - _phead->_seqno);
+			}
+
 			/*!
 			* \brief 从尾部插入
 			* \param seqno 帧序号
@@ -155,7 +178,7 @@ namespace ec {
 			*/
 			int push_back(seqno_t seqno, int64_t  msec, const void* pfrm, size_t frmsize)//接收缓冲区使用
 			{
-				if (!pfrm || frmsize > SIZE_UDPFRM)
+				if (!pfrm || frmsize > MAXSIZE_MTU)
 					return -1;
 				t_node* pf = new t_node;
 				if (!pf)
@@ -222,7 +245,7 @@ namespace ec {
 			*/
 			int insert_fast(seqno_t seqno, int64_t  msec, const void* pfrm, size_t frmsize)
 			{
-				if (!pfrm || frmsize > SIZE_UDPFRM)
+				if (!pfrm || frmsize > MAXSIZE_MTU)
 					return -1;
 				if (!_phead) {
 					t_node* pf = makenode(seqno, msec, pfrm, frmsize);
@@ -272,8 +295,6 @@ namespace ec {
 
 			int insert_tail(seqno_t seqno, int64_t  msec, const void* pfrm, size_t frmsize) //从尾部开始插入
 			{
-				if (!pfrm || frmsize > SIZE_UDPFRM)
-					return -1;
 				t_node* p = _ptail;
 				t_node* pf = nullptr;
 				while (p) {
@@ -333,6 +354,7 @@ namespace ec {
 		class frmlist_send : public frmlist
 		{
 		public:
+			size_t _numPkgResend = 0; //重发报文数，用于统计重发率
 			frmlist_send(){
 			}
 			virtual ~frmlist_send() {
@@ -390,6 +412,7 @@ namespace ec {
 							n++;
 							if (maxcnt < pf->_cntresend)
 								maxcnt = pf->_cntresend;
+							_numPkgResend++;
 						}
 					}
 					pf = pf->_pnext;
@@ -516,20 +539,18 @@ namespace ec {
 			 * @remark deprecated at 2022.10.28
 			*/
 			template<class _CLS>
-			int getrecvacks(int nmax, int uplimit, seqno_t ackto, _CLS& seqnos)
+			int getrecvacks(seqno_t nxtrcvno, _CLS& seqnos)
 			{
-				int n = 0;
 				t_node* pf = _phead;
 				seqnos.clear();
-				while (n < nmax && pf) {
-					if (pf->_ack < uplimit && pf->_seqno >= ackto) {
+				while (pf) {
+					if (pf->_seqno >= nxtrcvno) {
 						seqnos.push_back(pf->_seqno);
 						pf->_ack++;
-						++n;
 					}
 					pf = pf->_pnext;
 				}
-				return n;
+				return (int)seqnos.size();
 			}
 		};
 
@@ -549,7 +570,7 @@ namespace ec {
 			uint8_t  _res; //保留
 			uint16_t _datasize; //数据大小
 
-			uint8_t  _data[SIZE_UDPCONTENT]; //数据
+			uint8_t  _data[MAXSIZE_MTU]; //数据
 
 			frmpkg() :_res(0), _datasize(0) {
 			}
@@ -644,7 +665,7 @@ namespace ec {
 			*/
 			int parsepkg(void* pfrm, size_t size) //解析报文，返回 -1表示错误; 0表示成功
 			{
-				if (size < SIZE_UCPHEAD)
+				if (size < SIZE_UCPHEAD || size >= sizeof(_data))
 					return -1; //长度错误
 				uint8_t* pu = ((uint8_t*)pfrm) + 4;
 				ec::stream ss(pfrm, size);
@@ -667,7 +688,7 @@ namespace ec {
 
 			void* parsepkgin(void* pfrm, size_t size) //就地解码,返回数据部分指针,其余参数在对象里。
 			{
-				if (size < SIZE_UCPHEAD)
+				if (size < SIZE_UCPHEAD || size >= sizeof(_data))
 					return nullptr; //长度错误
 				uint8_t* pu = ((uint8_t*)pfrm) + 4;
 				ec::stream ss(pfrm, size);
@@ -697,7 +718,7 @@ namespace ec {
 			*/
 			int parsepkghead(const void* pfrm, size_t size) //解析头部，返回 -1表示错误; 0表示成功
 			{
-				if (size < SIZE_UCPHEAD)
+				if (size < SIZE_UCPHEAD || size >= sizeof(_data))
 					return -1; //长度错误
 				uint8_t ubuf[24];
 				memcpy(ubuf, pfrm, SIZE_UCPHEAD);
@@ -729,6 +750,36 @@ namespace ec {
 				pkg._frmcmd = cmd;
 				return pkg.makepkg(pout, sizeout, pdata, sizedata);
 			}
+
+			//重新打包,返回新报文，长度同size.
+			void* remakepkg(const void* pfrm, size_t size) //解析报文，返回 -1表示错误; 0表示成功
+			{
+				if (size < SIZE_UCPHEAD || size > sizeof(_data))
+					return nullptr; //长度错误
+				memcpy(_data, pfrm, size);
+				uint8_t* pu = ((uint8_t*)_data) + 4;
+				ec::stream ss((void*)_data, size);
+				try {
+					ss >> _crc32;
+					fastxor_le(pu, (int)size - 4, _crc32);//快速异或取消掩码
+					ss >> _ussid >> _seqno >> _frmcmd >> _res >> _datasize;
+					if (_datasize + SIZE_UCPHEAD != size)
+						return nullptr; //头部错误
+
+					//重新打包
+					_res |= 0x80; //改变res最高位
+					ss.setpos(0);
+					ss << _crc32 << _ussid << _seqno << _frmcmd << _res << _datasize;
+					_crc32 = ec::crc32(pu, SIZE_UCPHEAD - 4);
+					ss.setpos(0);
+					ss << _crc32;
+					fastxor_le(pu, SIZE_UCPHEAD - 4 + _datasize, _crc32);//快速异或
+				}
+				catch (...) {
+					return nullptr;
+				}
+				return &_data[0];
+			}
 		};
 
 		/*!
@@ -740,14 +791,11 @@ namespace ec {
 		protected:
 			uint32_t _ssid; //会话ID,用于识别连接,握手时客户端定义低16位，服务端定义高16位
 			seqno_t _nxtsndno; //下一个发送序列号,从1开始
-			seqno_t _nxtrcvno; //下一个接收序列号,从1开始,
+			seqno_t _nxtrcvno; //下一个接收序列号,从1开始,连续接收的。
 			seqno_t _ackrcvno; //已向对端发送的确认到序列号,从0开始
 			seqno_t _ackmaxsndno; //单个确认的最大序列号，用于实现按照序列号差重发数据.
 			frmlist_send _sbuf; //待确认的发送缓冲
 			frmlist_recv _rbuf; //接收缓冲,用于纠序和补齐
-
-			int64_t _lastack2time; //上次确认到的时间
-			uint32_t _uack2sameno; //相同_ackrcvno的确认次数，不超过4次
 
 			ec::vector<seqno_t> _seqnos;//重复使用的多seqno确认处理缓冲区
 		public:
@@ -771,8 +819,6 @@ namespace ec {
 				_time_lastread = ec::mstime();
 				_time_lastsend = _time_lastread;
 				_forceack2 = 0;
-				_lastack2time = 0;
-				_uack2sameno = 0;
 				_seqnos.reserve(SIZE_UDPCONTENT/sizeof(seqno_t));
 				memset(_guid, 0, sizeof(_guid));
 			}
@@ -807,21 +853,25 @@ namespace ec {
 				return _nxtrcvno;
 			}
 
+			inline seqno_t getnxtsndno() {
+				return _nxtsndno;
+			}
+
+			inline size_t getresndcount() {
+				return _sbuf._numPkgResend;
+			}
+
 			inline seqno_t maxrecvno() {
 				return _rbuf.maxrecvno();
 			}
+
 			inline seqno_t getrcvack2no() {
 				return _ackrcvno;
 			}
 
-			size_t sndbuf_leftfrms() //发送空间剩余可用帧数
-			{
-				if (_sbuf.size() < SIZE_UDPSENDFULL_FRMS)
-					return (SIZE_UDPSENDFULL_FRMS - _sbuf.size());
-				return 0u;
-			}
-
-			inline size_t sndbufsize() {
+			inline size_t sndbufsize(int *pdiff = nullptr) {
+				if (pdiff)
+					*pdiff = _sbuf.diffno();
 				return _sbuf.size();
 			}
 			inline size_t recvbufsize() {
@@ -832,6 +882,7 @@ namespace ec {
 			{
 				return _sbuf.acked(seqno);
 			}
+
 			/*!
 			\brief 处理一帧接收到的数据帧，重发帧和确认帧
 			\param fd 接收数据的fd
@@ -860,7 +911,7 @@ namespace ec {
 							return -1;
 						}
 						seqno_t no;
-						_seqnos.clear();//2022-11-8开始，对端会存放一个收到的最大序列号
+						_seqnos.clear();//存放一个有序大于连续接收的序列号
 						try {
 							ec::stream ss(pkgd._data, pkgd._datasize);
 							for (auto i = 0u; i < pkgd._datasize / sizeof(seqno_t); i++) {
@@ -906,7 +957,7 @@ namespace ec {
 				int ns = 0, nall = (int)size, nc = SIZE_UDPCONTENT, frmlen;
 				const char* ps = (const char*)pdata;
 				frmpkg pkg;
-				while (ns < nall && _sbuf.size() < SIZE_UDPSENDFULL_FRMS) {
+				while (ns < nall) {
 					nc = SIZE_UDPCONTENT;
 					if (ns + nc > nall)
 						nc = nall - ns;
@@ -961,75 +1012,48 @@ namespace ec {
 				return nr;
 			}
 
-			/*!
-			* brief 批量确认，定时重复确认使用
-			* param frmout报文输出区
-			* param sizeout 报文输出区大小
-			* return 返回报文长度
-			* remark 用于减少网络环境较差时确认包丢失造成的不必要的重发。 deprecated at 2022.10.28
-			*/
-			//批量确认返回完整报文,0没有，-1错误; >0报文长度
-			int acks(uint8_t* frmout, size_t sizeout)
-			{
-				seqno_t u2 = _nxtrcvno - 1u;
-				ec::array<seqno_t, SIZE_UDPCONTENT / sizeof(seqno_t)> nos;
-				int n = _rbuf.getrecvacks((int)nos.capacity(), 4, _nxtrcvno, nos);
-				if (!n && !u2)
-					return 0;
-				if (!n && _ackrcvno >= u2 && _uack2sameno > 2 && !_forceack2)
-					return 0;
-				if (_ackrcvno != u2)
-					_uack2sameno = 0;
-				++_uack2sameno;
-
-				frmpkg pkg;
-				pkg._ussid = _ssid;
-				pkg._seqno = u2;
-				pkg._frmcmd = FRMCMD_ACK;
-				ec::stream ss(pkg._data, sizeof(pkg._data));
-				for (auto& i : nos)
-					ss << i;
-				pkg._datasize = (uint16_t)(sizeof(seqno_t) * nos.size());
-				int frmsize = pkg.makepkg(frmout, sizeout);
-				if (frmsize < 0)
-					return -1;
-				_ackrcvno = u2;
-				_forceack2 = 0;
-				return frmsize;
-			}
-
 			/**
-			* brief 确认到
-			* param frmout报文输出区
-			* param sizeout 报文输出区大小
-			* return 返回报文长度
-			* remark 没有数据,包头的seqno存储已确认的seqno,
+			* brief 批量确认到
+			* param udpsend 如果有应答,会使用这个回调函数向对端发送udp报文(ucp帧),返回>=0表示发送的字节数, -1表示发送错误
+			* param udpsend_param udpsend中的app_param。
+			* remark 包头的seqno存储已确认的seqno,数据存储的大于等于_nxtrcvno的已收到的暂不能拼接的报文序列号
 			*/
-			int ack(uint8_t* frmout, size_t sizeout)
+			void ackex(cb_udpsend udpsend, void* udpsend_param)
 			{
-				seqno_t u2 = _nxtrcvno - 1u;
-				if (!u2)
-					return 0;
-				if (_ackrcvno == u2 && _uack2sameno > 2 && !_forceack2)
-					return 0;
-				if (_ackrcvno != u2)
-					_uack2sameno = 0;
-				++_uack2sameno;
-
+				if (_forceack2 <= 0)
+					return;
+				--_forceack2;
 				frmpkg pkg;
+				uint8_t frmout[MAXSIZE_MTU];
+
 				pkg._ussid = _ssid;
-				pkg._seqno = u2;
+				pkg._seqno = _nxtrcvno - 1;
 				pkg._frmcmd = FRMCMD_ACK;
-				
+
+				ec::vector<seqno_t> vnos;
+				vnos.reserve(128);
+				_rbuf.getrecvacks(_nxtrcvno, vnos);
+
 				ec::stream ss(pkg._data, sizeof(pkg._data));
-				ss << maxrecvno(); //带一个收到的最大序列号
-				pkg._datasize = (uint16_t)sizeof(seqno_t);
-				int frmsize = pkg.makepkg(frmout, sizeout);
-				if (frmsize < 0)
-					return -1;
-				_ackrcvno = u2;
-				_forceack2 = 0;
-				return frmsize;
+				int n = 0, nmaxseqno = (SIZE_UDPCONTENT - 16) / (int)sizeof(seqno_t), nfl;
+				for (auto i = 0u; i < vnos.size(); i++) {
+					ss << vnos[i];
+					++n;
+					if (n >= nmaxseqno) {
+						pkg._datasize = n * sizeof(seqno_t);
+						nfl = pkg.makepkg(frmout, sizeof(frmout));
+						if (nfl > 0)
+							sendfrm(frmout, nfl, udpsend, udpsend_param);
+						n = 0;
+						ss.setpos(0);
+					}
+				}
+				if (vnos.empty() || static_cast<int>(vnos.size()) % nmaxseqno) {
+					pkg._datasize = n * sizeof(seqno_t);
+					nfl = pkg.makepkg(frmout, sizeof(frmout));
+					if (nfl > 0)
+						sendfrm(frmout, nfl, udpsend, udpsend_param);
+				}
 			}
 		protected:
 			/*!
@@ -1043,16 +1067,15 @@ namespace ec {
 			*/
 			int do_datafrm(seqno_t seqno, const void* pudp, size_t size, ec::ilog* plog, ec::vector<frmlist::t_node*>& frmout)
 			{
-				if (seqno < _nxtrcvno) { //已经处理了，直接抛弃, 回送一个确认到
-					_forceack2 = 1;
+				_forceack2 = 2; //发两次
+				if (seqno < _nxtrcvno)
 					return 0;
-				}
 				if (_rbuf.add(seqno, pudp, size) < 0)
 					return -1;
 				int nr = _rbuf.ackread(_nxtrcvno, frmout);
 				if (nr > 0) //以后连续确认
 					_nxtrcvno += nr;
-				if (nr < 0)
+				else if (nr < 0)
 					return -1;
 				return 0;
 			}
@@ -1116,11 +1139,57 @@ namespace ec {
 
 			void loginfo(int viewcon)
 			{
-				if (_plog) {
-					if (viewcon)
-						_plog->add(CLOG_DEFAULT_DBG, "map size %zu, mapcon size %zu", _map.size(), _mapcon.size());
-					else
-						_plog->add(CLOG_DEFAULT_DBG, "map size %zu", _map.size());
+				if (!_plog ||(!_map.size() && !_mapcon.size()))
+					return;
+				ec::string info;
+				info.reserve(1024 * 8);
+				char sl[512];
+				int nl;
+				const char* shead = "ssid       nFrmSnd  nFrmRSnd   ReSnd%  nFrmRecv  UnAckSize  UnAckDiff";
+				if (viewcon)
+					_plog->add(CLOG_DEFAULT_INF, "session info: ssids %zu, out connecting %zu \n%s", _map.size(), _mapcon.size(), shead);
+				else
+					_plog->add(CLOG_DEFAULT_INF, "session info: ssids %zu\n%s", _map.size(), shead);
+				uint32_t numSnd, numReSnd, numSndbuf;
+				int diffno = 0;
+				for (auto& i : _map) {
+					numSnd = static_cast<uint32_t>(i->getnxtsndno() - 1);
+					numReSnd = static_cast<uint32_t>(i->getresndcount());
+					numSndbuf = (uint32_t)i->sndbufsize(&diffno);
+					nl = snprintf(sl, sizeof(sl), "%08X  %8u  %8u  %7.3f  %8u  %9u  %8d\n", i->get_ssid(), numSnd, numReSnd,
+						numSnd ? (100.0 * static_cast<double>(numReSnd)) / static_cast<double>(numSnd) : 0,
+						i->getnxtrcvno() - 1, numSndbuf, diffno);
+					info.append(sl, nl);
+					if (info.size() > 1024 * 7) {
+						_plog->append(CLOG_DEFAULT_INF, "%s", info.c_str());
+						info.clear();
+					}
+				}
+				if(!info.empty())
+					_plog->append(CLOG_DEFAULT_INF, "%s", info.c_str());
+			}
+
+			void deleteTimeOut(int64_t mseconds)
+			{
+				int64_t curms = ec::mstime();
+				ec::vector<uint32_t> ssids;
+				ssids.reserve(32);
+
+				for (auto& i : _map) {
+					if (i->getnxtsndno() != 1u || i->getnxtrcvno() != 1u)
+						continue;
+					if (curms - i->_time_lastread < mseconds || curms - i->_time_lastsend < mseconds)
+						continue;
+					ssids.push_back(i->get_ssid());
+				}
+				for (auto& i : ssids) {
+					_map.erase(i, [&](PSOCKET& p) {
+						if (p) {
+							delete p;
+							p = nullptr;
+							ondisconnected(i, ucp_disconnect_timeout);//断开通知
+						}
+						});
 				}
 			}
 		protected:
@@ -1205,12 +1274,27 @@ namespace ec {
 				_maxresendcnt = maxresendcnt;
 			}
 
-			size_t sndbuf_leftfrms(uint32_t ssid) //可以发送的缓冲大小
+			size_t sndbuf_frms(uint32_t ssid, int* pdiff = nullptr) //发送的缓冲堆积大小
+			{
+				PSOCKET p = nullptr;
+				if (pdiff)
+					*pdiff = 0;
+				if (!_map.get(ssid, p))
+					return 0;
+				return p->sndbufsize(pdiff);
+			}
+
+			size_t CanSendFrms(uint32_t ssid)
 			{
 				PSOCKET p = nullptr;
 				if (!_map.get(ssid, p))
 					return 0;
-				return p->sndbuf_leftfrms();
+				int ndiff = 0;
+				int sizebuf = (int) p->sndbufsize(&ndiff);
+				if (sizebuf >= SIZE_UDPBUF_UNACKED || ndiff >= UNACK_SEQNO_DIFF)
+					return 0;
+				return (SIZE_UDPBUF_UNACKED - sizebuf) < (UNACK_SEQNO_DIFF - ndiff) ?
+					(SIZE_UDPBUF_UNACKED - sizebuf) : (UNACK_SEQNO_DIFF - ndiff);
 			}
 
 			virtual ~ucp() {
@@ -1244,7 +1328,7 @@ namespace ec {
 				for (auto& i : _udps) {
 					ps->addudp(i._fd, i.addr(), i.addrlen());
 				}
-				uint8_t frmreq[SIZE_UDPFRM];
+				uint8_t frmreq[MAXSIZE_MTU];
 				int ns = frmpkg::mkfrm(ps->get_ssid(), ps->get_ssid(), FRMCMD_SYN, guidmd5, UCP_GUID_SIZE, frmreq, sizeof(frmreq));
 				
 				//多通道同时发出连接请求
@@ -1291,7 +1375,7 @@ namespace ec {
 				const void* pfrm, size_t size, ec::vector<frmlist::t_node*>& outfrms, uint32_t &ussid)
 			{
 				frmpkg pkg;
-				uint8_t frmret[SIZE_UDPFRM];
+				uint8_t frmret[MAXSIZE_MTU];
 				if (pkg.parsepkghead(pfrm, size) < 0) {
 					if (_plog && _plog->getlevel() >= CLOG_DEFAULT_ALL) {
 						char smsg[2048];
@@ -1439,19 +1523,13 @@ namespace ec {
 			*/
 			void runtime(int64_t curmsec, int interval) //运行时，定时调用，主要时重发, curmsec为当前时间毫秒数
 			{
-				int nfl;
-				uint8_t frmout[SIZE_UDPFRM];
-				if (_lastruntime + interval > curmsec && _lastruntime <= curmsec)
+				uint8_t frmout[MAXSIZE_MTU];
+				if (llabs(curmsec - _lastruntime) < interval)
 					return;
 				_lastruntime = curmsec;
 
 				for (auto& i : _map) { //批量确认,双通道发送
-					nfl = i->ack(frmout, sizeof(frmout));
-					if (nfl < 0)
-						_plog->add(CLOG_DEFAULT_ERR, "ssid(%08XH) acks error.", i->get_ssid());
-					else if (nfl > 0) {
-						i->sendfrm(frmout, nfl, _udpsend, _udpsend_param);
-					}
+					i->ackex(_udpsend, _udpsend_param);
 				}
 
 				int ncnt = 0, nfrms = 0;
@@ -1462,7 +1540,7 @@ namespace ec {
 					ncnt = 0;
 					as_timeover = 0;
 					as_seqo = 0;
-					nfrms = i->resend(curmsec, ncnt, _udpsend, _udpsend_param, _resendackno, (int)_resendtime,16, as_timeover, as_seqo);
+					nfrms = i->resend(curmsec, ncnt, _udpsend, _udpsend_param, _resendackno, (int)_resendtime, 16 , as_timeover, as_seqo);
 					if (nfrms > 0)
 						_plog->add(CLOG_DEFAULT_DBG, "ssid(%08XH) resend %d frames. timeover=%d, seqnoout=%d max resend counts %d, sndbuf %zu",
 							i->get_ssid(), nfrms, as_timeover, as_seqo, ncnt - 1, i->sndbufsize());
@@ -1487,7 +1565,7 @@ namespace ec {
 
 				//处理确心跳
 				for (auto& i : _map) {
-					if (curmsec - i->_time_lastsend > 20 * 1000 || curmsec < i->_time_lastsend) {
+					if (llabs(curmsec - i->_time_lastsend) > 10 * 1000) {
 						int ns = frmpkg::mkfrm(i->get_ssid(), 0, FRMCMD_HRT, nullptr, 0, frmout, sizeof(frmout));
 						if(ns >0)
 							i->sendfrm(frmout, ns, _udpsend, _udpsend_param);

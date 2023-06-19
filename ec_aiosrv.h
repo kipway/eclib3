@@ -7,6 +7,7 @@
 * class ec::aio::netserver
 
 * @update
+	2023-6-16 add tcp keepalive
 	2023-6-7 fix netserver::tcpconnect(uint16_t port, const char* sip) connect localhost failed in windows while sip==nul
 	2023-6-6  增加可持续fd
     2023-5-21 update for download big http file
@@ -207,6 +208,7 @@ namespace ec {
 					close_(fd);
 					return -1;
 				}
+				setkeepalive(fd);
 #ifndef _WIN32
 				if (epoll_add_tcpout(fd) < 0) {
 					delete pss;
@@ -392,6 +394,7 @@ namespace ec {
 
 			virtual void onAccept(int fd, const char* sip, uint16_t port, int fdlisten)
 			{
+				setkeepalive(fd);
 				_plog->add(CLOG_DEFAULT_DBG, "onAccept fd(%d), listenfd(%d)", fd, fdlisten);
 				psession pss = new session(&_sndbufblks, fd, fdlisten);
 				if (!pss)

@@ -853,6 +853,10 @@ namespace ec
 			{
 				return _ip.empty() ? _ipv6.c_str() : _ip.c_str();
 			}
+			inline bool isipv6()
+			{
+				return !_ipv6.empty();
+			}
 		public:
 			uint16_t _port;
 			STR_ _protocol;
