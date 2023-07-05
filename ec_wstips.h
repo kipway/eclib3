@@ -150,7 +150,7 @@ namespace ec
 		return err == Z_STREAM_END ? 0 : err;
 	}
 
-	template <class _Out>
+	template <class _Out = vstream>
 	bool ws_make_permsg(const void* pdata, size_t sizes, unsigned char wsopt, _Out* pout, int ncompress, uint32_t umask = 0) //multi-frame,permessage_deflate
 	{
 		unsigned char uc;

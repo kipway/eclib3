@@ -2,7 +2,8 @@
 \file ec_tlsclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2020.9.6
+\update
+  2023.6.26 remove ec::memory
 
 TLS1.2(rfc5246)
 support:
@@ -17,7 +18,7 @@ tls_c
 	client TLS1.2 session class
 	tcp_c -> tls_c
 
-eclib 3.0 Copyright (c) 2017-2019, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,11 +32,7 @@ namespace ec
 	class tls_c : public tcp_c
 	{
 	public:
-		tls_c(memory* pmem, ilog* plog) :
-			_nstatus(TLS_SESSION_NONE)
-			, _pmem(pmem)
-			, _plog(plog)
-			, _tls(0, pmem, plog)
+		tls_c(ilog* plog) : _nstatus(TLS_SESSION_NONE), _plog(plog), _tls(0, plog)
 		{
 		}
 
@@ -48,7 +45,7 @@ namespace ec
 		{
 			if (TLS_SESSION_HKOK != _nstatus)
 				return tcp_c::sendbytes(p, nlen);
-			bytes pkg(_pmem);
+			bytes pkg;
 			pkg.reserve(128 * (nlen / TLS_CBCBLKSIZE) + nlen + 256 - nlen % 128);
 			if (!_tls.MakeAppRecord(&pkg, p, nlen)) {
 				close();
@@ -61,10 +58,13 @@ namespace ec
 		{
 			return _nstatus;
 		}
+		inline uint16_t getCipherSuite()
+		{
+			return _tls.getCipherSuite();
+		}
 	private:
 		int   _nstatus; //tls status;  TLS_SESSION_XXX
 	protected:
-		memory* _pmem;
 		ilog* _plog;
 	private:
 		tls::sessionclient _tls;
@@ -76,7 +76,7 @@ namespace ec
 		{
 			tcp_c::onconnected();
 			_tls.Reset();
-			bytes pkg(_pmem);
+			bytes pkg;
 			pkg.reserve(1024 * 12);
 			_tls.mkr_ClientHelloMsg(&pkg);
 			tcp_c::sendbytes(pkg.data(), (int)pkg.size());
@@ -89,7 +89,7 @@ namespace ec
 
 		virtual void onreadbytes(const uint8_t* p, int nbytes)
 		{
-			bytes pkg(_pmem);
+			bytes pkg;
 			pkg.reserve(1024 * 16);
 			int nst = _tls.OnTcpRead(p, nbytes, &pkg);
 			if (TLS_SESSION_ERR == nst || TLS_SESSION_OK == nst || TLS_SESSION_NONE == nst) {

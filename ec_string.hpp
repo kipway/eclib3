@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update 
+2023.6.26 Optimize ec::string_::append() compatibility 
 2023.5.25 add fixstring_
 2023.5.13 use ec_malloc
 
@@ -336,12 +337,24 @@ namespace ec
 				return *this;
 			return append(s, strlen(s));
 		}
-		string_& append(value_type c) noexcept
+		/*string_& append(value_type c) noexcept
 		{
 			size_t zs = size();
 			if (recapacity(zs + 1)) {
 				_pstr[zs] = c;
 				setsize_(_pstr, zs + 1);
+			}
+			return *this;
+		}*/
+		string_& append(size_t n, value_type c) noexcept
+		{
+			size_t zs = size();
+			if (recapacity(zs + n)) {
+				setsize_(_pstr, zs + n);
+				while (n > 0) {
+					_pstr[zs++] = c;
+					--n;
+				}
 			}
 			return *this;
 		}
@@ -381,11 +394,16 @@ namespace ec
 		}
 		inline string_& operator+= (value_type c) noexcept
 		{
-			return append(c);
+			push_back(c);
+			return *this;
 		}
 		inline void push_back(value_type c) noexcept
 		{
-			append(c);
+			size_t zs = size();
+			if (recapacity(zs + 1)) {
+				_pstr[zs] = c;
+				setsize_(_pstr, zs + 1);
+			}
 		}
 		void pop_back() noexcept
 		{

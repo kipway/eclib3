@@ -2,8 +2,9 @@
 \file ec_wsclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2022.8.5
-
+\update
+  2023.7.5  remove ec::memory
+  2023.6.25 add sendPingMsgMsg
 ws_c
 	class for websocket client
 	tcp_c -> ws_c
@@ -28,10 +29,8 @@ namespace ec
 	class websocketclient
 	{
 	public:
-		websocketclient(memory* pmem, ilog* plog) :
-			_pmem(pmem)
-			, _plog(plog)
-			, _wsmsg(pmem)
+		websocketclient(ilog* plog)
+			: _plog(plog)
 			, _comp(0)
 			, _opcode(WS_OP_TXT)
 
@@ -46,7 +45,6 @@ namespace ec
 			_wsmsg.reserve(1024 * 16);
 		}
 	protected:
-		memory* _pmem;
 		ilog* _plog;
 		cGuid _guid;
 		char  _srequrl[80];
@@ -141,10 +139,8 @@ namespace ec
 			return true;
 		}
 
-		template<class _Out>
-		int doRequest(parsebuffer& rin, _Out& pkg)
+		int doRequest(parsebuffer& rin)
 		{
-			pkg.clear();
 			http::package htp;
 			int nlen = htp.parse((const char*)rin.data_(), rin.size_());
 			if (nlen < 0) {
@@ -174,7 +170,7 @@ namespace ec
 		}
 
 		template<class _Out>
-		int doWsData(parsebuffer& rbuf, _Out* pmsgout, int* popcode = nullptr)
+		int doWsData(parsebuffer& rbuf, _Out* pmsgout, int* popcode = nullptr)// return -1:error; 0: no msg; 1:one msg
 		{
 			size_t sizedo = 0;
 			pmsgout->clear();
@@ -188,10 +184,10 @@ namespace ec
 					rbuf.freehead(sizedo);
 				}
 			}
-			return 0;
+			return nr == he_ok? 1 : 0;
 		}
 
-		template<class _Out>
+		template<class _Out = vstream>
 		int makeWsPackage(const void* p, size_t size, _Out* pout, int opcode = WS_OP_TXT)
 		{
 			if (_wscompress == ws_x_webkit_deflate_frame)  //deflate-frame
@@ -276,7 +272,7 @@ namespace ec
 				_wsmsg.append((uint8_t*)stxt + datapos, datalen);
 			else {
 				if (_wscompress == ws_x_webkit_deflate_frame) { //deflate_frame
-					bytes debuf(_pmem);
+					bytes debuf;
 					debuf.reserve(EC_SIZE_WS_FRAME);
 					debuf.push_back('\x78');
 					debuf.push_back('\x9c');
@@ -286,7 +282,7 @@ namespace ec
 							return -1;
 					}
 					else {
-						bytes tmp(_pmem);
+						bytes tmp;
 						tmp.reserve(4 * debuf.size());
 						if (Z_OK != ws_decode_zlib(debuf.data(), debuf.size(), &tmp))
 							return -1;
@@ -303,7 +299,7 @@ namespace ec
 			}
 			return (int)sizedo;
 		}
-		template<class _Out>
+		template<class _Out = bytes>
 		int WebsocketParse(const char* stxt, size_t usize, size_t& sizedo, _Out* pout, int* popcode = nullptr)//support multi-frame
 		{
 			const char* pd = stxt;
@@ -346,13 +342,7 @@ namespace ec
 	class ws_c : public tcp_c
 	{
 	public:
-		ws_c(memory* pmem, ilog* plog) :
-			_nstatus(0)
-			, _pmem(pmem)
-			, _plog(plog)
-			, _rbuf(pmem)
-			, _ws(pmem, plog)
-
+		ws_c(ilog* plog) : _nstatus(0) , _plog(plog) , _ws(plog)
 		{
 		}
 
@@ -363,7 +353,6 @@ namespace ec
 	private:
 		int _nstatus;// 0: none handshaked;  1:handshaked
 	protected:
-		memory* _pmem;
 		ilog* _plog;
 	private:
 		parsebuffer _rbuf;
@@ -382,9 +371,26 @@ namespace ec
 		{
 			if (!_nstatus)
 				return tcp_c::sendbytes(p, nlen);
-			bytes vs(_pmem);
+			vstream vs;
 			vs.reserve(1024 + nlen - nlen % 512);
 			if (_ws.makeWsPackage(p, nlen, &vs) < 0) {
+				close();
+				return -1;
+			}
+			return tcp_c::sendbytes(vs.data(), (int)vs.size());
+		}
+		/**
+		 * @brief send ping messgae
+		 * @param sutf8 text to send
+		 * @return -1: error; 0:none handshaked; >0 package size sended;
+		*/
+		int sendPingMsg(const char* sutf8)
+		{
+			if (!_nstatus)
+				return 0;
+			const char* s = (sutf8 && *sutf8) ? sutf8 : "ping";
+			vstream vs;
+			if (_ws.makeWsPackage(s, strlen(s), &vs, WS_OP_PING) < 0) {
 				close();
 				return -1;
 			}
@@ -394,8 +400,8 @@ namespace ec
 		virtual void onconnected()
 		{
 			tcp_c::onconnected();
-			bytes pkg(_pmem);
-			pkg.reserve(1024 * 4);
+			bytes pkg;
+			pkg.reserve(500);
 			_ws.makeRequest(pkg);
 			tcp_c::sendbytes(pkg.data(), (int)pkg.size());
 		}
@@ -409,11 +415,10 @@ namespace ec
 		virtual void onreadbytes(const uint8_t* p, int nbytes)
 		{
 			int nr = 0, nopcode = 0;
-			bytes pkg(_pmem);
-			pkg.reserve(1024 * 16);
+			bytes pkg;
 			_rbuf.append(p, nbytes);
 			if (!_nstatus) {
-				nr = _ws.doRequest(_rbuf, pkg);
+				nr = _ws.doRequest(_rbuf);
 				if (nr < 0) {
 					close();
 					return;
@@ -425,14 +430,8 @@ namespace ec
 				if (_rbuf.empty())
 					return;
 			}
-			pkg.clear();
 			nr = _ws.doWsData(_rbuf, &pkg, &nopcode);
-			if (nr < 0) {
-				close();
-				_nstatus = 0;
-				return;
-			}
-			while (pkg.size()) {
+			while (1 == nr) {
 				if (WS_OP_PING == nopcode) {
 					if (sendwsbytes(pkg.data(), (int)pkg.size(), WS_OP_PONG) < 0)
 						return;
@@ -442,17 +441,16 @@ namespace ec
 				pkg.clear();
 				nopcode = 0;
 				nr = _ws.doWsData(_rbuf, &pkg, &nopcode);
-				if (nr < 0) {
-					close();
-					_nstatus = 0;
-					return;
-				}
+			}
+			if (nr < 0) {
+				close();
+				_nstatus = 0;
 			}
 		}
 
 		int sendwsbytes(const void* p, int nlen, int opcode)
 		{
-			bytes vs(_pmem);
+			vstream vs;
 			vs.reserve(1024 + nlen - nlen % 512);
 			if (_ws.makeWsPackage(p, nlen, &vs, opcode) < 0) {
 				close();

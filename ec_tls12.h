@@ -3,6 +3,8 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update:
+2023.7.4   Fix mkr_ClientKeyExchange
+2023.6.26  remove ec:array, fix mkr_ClientHelloMsg compression_methods
 2023.5.13  remove ec::memory
 2023.2.6   add srvca::isok()
 
@@ -180,15 +182,11 @@ namespace ec
 		public:
 			handshake()
 			{
+				_srv_certificate.reserve(4000);
 			}
 		public:
-			array<uint8_t, 256>  _srv_hello;
-			array<uint8_t, 16384> _srv_certificate;
-			array<uint8_t, 256>  _srv_hellodone;
-
-			array<uint8_t, 1024> _cli_hello;
-			array<uint8_t, 640 > _cli_key_exchange;
-			array<uint8_t, 512>  _cli_finished;
+			ec::bytes _srv_hello, _srv_certificate, _srv_hellodone;
+			ec::bytes _cli_hello, _cli_key_exchange, _cli_finished;
 		public:
 			_USE_EC_OBJ_ALLOCATOR
 			template<class _Out>
@@ -288,6 +286,10 @@ namespace ec
 			}
 			inline void appendreadbytes(const void* pdata, size_t size) {
 				_pkgtcp.append(pdata, size);
+			}
+			inline uint16_t getCipherSuite()
+			{
+				return _cipher_suite;
 			}
 		protected:
 			ilog* _plog;
@@ -446,7 +448,7 @@ namespace ec
 			template <class _Out>
 			bool mk_nocipher(_Out *pout, int nprotocol, const void* pd, size_t size)
 			{
-				uint8_t s[TLS_REC_BUF_SIZE];
+				uint8_t s[8];
 				const uint8_t *puc = (const uint8_t *)pd;
 				size_t pos = 0, ss;
 
@@ -648,17 +650,18 @@ namespace ec
 					return false;
 				_hmsg->_cli_hello.clear();
 				try {
-					_hmsg->_cli_hello << ((uint8_t)tls::hsk_client_hello);  // msg type  1byte
-					_hmsg->_cli_hello << ((uint8_t)0) << (uint8_t)0 << (uint8_t)0; // msg len  3byte
-					_hmsg->_cli_hello << (uint8_t)TLSVER_MAJOR << (uint8_t)TLSVER_NINOR;
-					_hmsg->_cli_hello.write(_clientrand, 32);// random 32byte
-					_hmsg->_cli_hello << (uint8_t)0;    // SessionID = NULL   1byte
-					_hmsg->_cli_hello < (uint16_t)0x08; // cipher_suites
-					_hmsg->_cli_hello << (uint8_t)0 << (uint8_t)TLS_RSA_WITH_AES_256_CBC_SHA256;
-					_hmsg->_cli_hello << (uint8_t)0 << (uint8_t)TLS_RSA_WITH_AES_128_CBC_SHA256;
-					_hmsg->_cli_hello << (uint8_t)0 << (uint8_t)TLS_RSA_WITH_AES_256_CBC_SHA;
-					_hmsg->_cli_hello << (uint8_t)0 << (uint8_t)TLS_RSA_WITH_AES_128_CBC_SHA;
-					_hmsg->_cli_hello < (uint16_t)0x10; // compression_methods
+					_hmsg->_cli_hello.push_back((uint8_t)tls::hsk_client_hello);  // message type 1byte
+					_hmsg->_cli_hello.append(3, (uint8_t)0); // message length 3byte
+					_hmsg->_cli_hello.append(1, (uint8_t)TLSVER_MAJOR).append(1, (uint8_t)TLSVER_NINOR);// version 2 bytes
+					_hmsg->_cli_hello.append(_clientrand, 32);// random 32byte
+					_hmsg->_cli_hello.push_back((uint8_t)0);  // SessionID = NULL   1byte
+					
+					_hmsg->_cli_hello.append(1, 0).append(1, 8) // cipher_suites<2..2^16-2>
+						.append(1, 0).append(1, (uint8_t)TLS_RSA_WITH_AES_256_CBC_SHA256)
+						.append(1, 0).append(1, (uint8_t)TLS_RSA_WITH_AES_128_CBC_SHA256)
+						.append(1, 0).append(1, (uint8_t)TLS_RSA_WITH_AES_256_CBC_SHA)
+						.append(1, 0).append(1, (uint8_t)TLS_RSA_WITH_AES_128_CBC_SHA);
+					_hmsg->_cli_hello.append(1, 1).append(1, 0); // compression_methods<1..2^8-1>
 				}
 				catch (...) {
 					return false;
@@ -800,8 +803,8 @@ namespace ec
 				if (!_hmsg)
 					return false;
 				unsigned char premasterkey[48], out[512];
-				premasterkey[0] = 3;
-				premasterkey[1] = 3;
+				premasterkey[0] = TLSVER_MAJOR;
+				premasterkey[1] = TLSVER_NINOR;
 				RAND_bytes(&premasterkey[2], 46); //calculate pre_master_key
 
 				const char* slab = "master secret";//calculate master_key
@@ -819,10 +822,11 @@ namespace ec
 				if (nbytes < 0)
 					return false;
 				_hmsg->_cli_key_exchange.clear();
-				uint8_t uh[4] = { (uint8_t)(tls::hsk_client_key_exchange), (uint8_t)(((uint32_t)nbytes >> 16) & 0xFF),
-								  (uint8_t)(((uint32_t)nbytes >> 8) & 0xFF),	(uint8_t)((uint32_t)nbytes & 0xFF)
+				uint8_t uh[6] = { (uint8_t)(tls::hsk_client_key_exchange), (uint8_t)(((uint32_t)(nbytes + 2) >> 16) & 0xFF),
+								  (uint8_t)(((uint32_t)(nbytes + 2) >> 8) & 0xFF), (uint8_t)((uint32_t)(nbytes + 2) & 0xFF),
+								  (uint8_t)(((uint32_t)nbytes >> 8) & 0xFF), (uint8_t)((uint32_t)nbytes & 0xFF)
 				};
-				_hmsg->_cli_key_exchange.append(uh, 4);
+				_hmsg->_cli_key_exchange.append(uh, 6);
 				_hmsg->_cli_key_exchange.append(out, nbytes);
 				return make_package(po, tls::rec_handshake, _hmsg->_cli_key_exchange.data(), _hmsg->_cli_key_exchange.size());
 			}
@@ -830,8 +834,6 @@ namespace ec
 			bool OnServerHello(unsigned char* phandshakemsg, size_t size)
 			{
 				if (!_hmsg)
-					return false;
-				if (size > _hmsg->_srv_hello.capacity())
 					return false;
 				_hmsg->_srv_hello.clear();
 				_hmsg->_srv_hello.append(phandshakemsg, size);
@@ -847,7 +849,7 @@ namespace ec
 				memcpy(_serverrand, puc, 32);
 				puc += 32;
 
-				int n = *puc++;
+				int n = *puc++; // sessionID
 				puc += n;
 
 				if (n + 40 > (int)_hmsg->_srv_hello.size())
@@ -1112,15 +1114,17 @@ namespace ec
 				RAND_bytes(_serverrand, sizeof(_serverrand));
 				_hmsg->_srv_hello.clear();
 				try {
-					_hmsg->_srv_hello << (uint8_t)tls::hsk_server_hello;
-					_hmsg->_srv_hello << (uint16_t)0 << (uint8_t)0;
-					_hmsg->_srv_hello << (uint8_t)TLSVER_MAJOR << (uint8_t)TLSVER_NINOR;
-					_hmsg->_srv_hello.write(_serverrand, 32);// random 32byte
-					_hmsg->_srv_hello << (uint8_t)4;
-					_hmsg->_srv_hello < _ucid;
-					_hmsg->_srv_hello << (uint8_t)0;
-					_hmsg->_srv_hello << (uint8_t)(_cipher_suite & 0xFF);
-					_hmsg->_srv_hello << (uint8_t)0;
+					_hmsg->_srv_hello.push_back((uint8_t)tls::hsk_server_hello);//message type 1 byte
+					_hmsg->_srv_hello.append(3, (uint8_t)0);// message length 3byte
+					_hmsg->_srv_hello.append(1, (uint8_t)TLSVER_MAJOR).append(1, (uint8_t)TLSVER_NINOR); // version
+					_hmsg->_srv_hello.append(_serverrand, 32);// random 32byte
+					_hmsg->_srv_hello.push_back((uint8_t)4); // SessionID<0..32> length = 4bytes, ucid
+					_hmsg->_srv_hello.append(1, (uint8_t)((_ucid >> 24) & 0xFF))
+						.append(1, (uint8_t)((_ucid >> 16) & 0xFF))
+						.append(1, (uint8_t)((_ucid >> 8) & 0xFF))
+						.append(1, (uint8_t)((_ucid >> 0) & 0xFF)); // session ID
+					_hmsg->_srv_hello.append(1, (uint8_t)0).append(1, (uint8_t)(_cipher_suite & 0xFF)); //cipher_suite 2 bytes
+					_hmsg->_srv_hello.append(1, 0);//compression_methods.null
 				}
 				catch (...) {
 					return false;
@@ -1181,7 +1185,7 @@ namespace ec
 			template <class _Out>
 			bool OnClientHello(uint8_t* phandshakemsg, size_t size, _Out* po)
 			{
-				if (!_hmsg || size > _hmsg->_cli_hello.capacity())
+				if (!_hmsg)
 					return false;
 				_hmsg->_cli_hello.clear();
 				_hmsg->_cli_hello.append(phandshakemsg, size);
@@ -1251,7 +1255,7 @@ namespace ec
 			template <class _Out>
 			bool OnClientKeyExchange(const uint8_t* pmsg, size_t sizemsg, _Out* po)
 			{
-				if (!_hmsg || sizemsg > _hmsg->_cli_key_exchange.capacity())
+				if (!_hmsg)
 					return false;
 				_hmsg->_cli_key_exchange.clear();
 				_hmsg->_cli_key_exchange.append(pmsg, sizemsg);
@@ -1267,14 +1271,14 @@ namespace ec
 
 				int nbytes = 0;
 				unsigned char premasterkey[48];
-				if (ulen % 16) {
+				if (ulen % 16) { //规范本版本
 					uint32_t ul = pmsg[4];//private key decode
 					ul = (ul << 8) | pmsg[5];
 					_pRsaLck->lock();
 					nbytes = RSA_private_decrypt((int)ul, pmsg + 6, premasterkey, _pRsaPrivate, RSA_PKCS1_PADDING);
 					_pRsaLck->unlock();
 				}
-				else {
+				else { //兼容错误版本
 					_pRsaLck->lock();
 					nbytes = RSA_private_decrypt((int)ulen, pmsg + 4, premasterkey, _pRsaPrivate, RSA_PKCS1_PADDING);
 					_pRsaLck->unlock();

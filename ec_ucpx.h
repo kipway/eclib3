@@ -4,6 +4,7 @@
 实现一个基于udp多通道并行的可靠传输的封装，取名为ucpx;
 
 \author jiangyong
+\update 2023-6-22 优化重发
 \update 2023-6-12 优化确认和重发
 \update 2023-2-7 增加ipv6支持
 \update 2022-10-28 优化CPU占用
@@ -117,8 +118,8 @@ namespace ec {
 			struct t_node
 			{
 				seqno_t _seqno; //报文号
-				int _ack; //0: 未确认; >0:确认次数
 				int _cntresend; //重发次数,作为发送缓冲时使用,0表示没有重发.
+				uint16_t _numchklost;//丢失检测次数，用于快速重发
 				uint16_t _frmsize; //报文大小,_frm里字节数
 				int64_t  _mstime;//接收或者发送的时标,自1970-1-1的毫秒数,只有发送才会填写用于重发，接受缓冲区始终填写0
 				t_node* _pprior;
@@ -187,7 +188,7 @@ namespace ec {
 				pf->_mstime = msec;
 				pf->_pprior = _ptail;
 				pf->_pnext = nullptr;
-				pf->_ack = 0;
+				pf->_numchklost = 0;
 				pf->_cntresend = 0;
 				pf->_frmsize = (uint16_t)frmsize;
 				memcpy(pf->_frm, pfrm, frmsize);
@@ -206,7 +207,7 @@ namespace ec {
 				pf->_mstime = msec;
 				pf->_pprior = _ptail;
 				pf->_pnext = nullptr;
-				pf->_ack = 0;
+				pf->_numchklost = 0;
 				pf->_cntresend = 0;
 				if (_ptail)
 					_ptail->_pnext = pf;
@@ -226,7 +227,7 @@ namespace ec {
 				pf->_mstime = msec;
 				pf->_pprior = nullptr;
 				pf->_pnext = nullptr;
-				pf->_ack = 0;
+				pf->_numchklost = 0;
 				pf->_cntresend = 0;
 				pf->_frmsize = (uint16_t)frmsize;
 				memcpy(pf->_frm, pfrm, frmsize);
@@ -394,26 +395,24 @@ namespace ec {
 				maxcnt = 0;
 				t_node* pf = _phead;
 				while (pf && n < maxsndfrms) {
-					if (!pf->_ack) {
-						ndo = 0;
-						if (llabs(curmstime - pf->_mstime) > resendtime(pf->_cntresend, baseresendtime)) { //超时重发
-							as_timeover += 1;
-							ndo = 1;
-						}
-						else if (0 == pf->_cntresend && pf->_seqno + acknodelta < maxacksndno) { //快速重发
-							as_seqo += 1;
-							ndo = 1;
-						}
-						if(ndo) {
-							for (auto& i : udps)
-								udpsend(i._fd, i.addr(),i.addrlen(), pf->_frm, pf->_frmsize, udpsend_param, true);//重发优先，使用插入
-							pf->_cntresend++;
-							pf->_mstime = curmstime;
-							n++;
-							if (maxcnt < pf->_cntresend)
-								maxcnt = pf->_cntresend;
-							_numPkgResend++;
-						}
+					ndo = 0;
+					if (llabs(curmstime - pf->_mstime) > resendtime(pf->_cntresend, baseresendtime)) { //超时重发
+						as_timeover += 1;
+						ndo = 1;
+					}
+					else if (0 == pf->_cntresend && (pf->_seqno + acknodelta < maxacksndno || pf->_numchklost > 1)) { //快速重发
+						as_seqo += 1;
+						ndo = 1;
+					}
+					if(ndo) {
+						for (auto& i : udps)
+							udpsend(i._fd, i.addr(),i.addrlen(), pf->_frm, pf->_frmsize, udpsend_param, true);//重发优先，使用插入
+						pf->_cntresend++;
+						pf->_mstime = curmstime;
+						n++;
+						if (maxcnt < pf->_cntresend)
+							maxcnt = pf->_cntresend;
+						_numPkgResend++;
 					}
 					pf = pf->_pnext;
 				}
@@ -440,7 +439,7 @@ namespace ec {
 				if (umaxseqno < act2no)
 					umaxseqno = act2no;
 				while (pf) {
-					if (pf->_ack || pf->_seqno <= act2no || qsearch_(pf->_seqno, pnos, size)) {
+					if (pf->_seqno <= act2no || qsearch_(pf->_seqno, pnos, size)) {
 						pdel = pf;
 						if (umaxseqno < pf->_seqno)
 							umaxseqno = pf->_seqno;
@@ -457,8 +456,11 @@ namespace ec {
 						delete pdel;
 						--_size;
 					}
-					else
+					else {
+						if (pnos && size && pf->_seqno < pnos[size - 1])
+							pf->_numchklost++;
 						pf = pf->_pnext;
+					}
 				}
 				return nr;
 			}
@@ -546,7 +548,6 @@ namespace ec {
 				while (pf) {
 					if (pf->_seqno >= nxtrcvno) {
 						seqnos.push_back(pf->_seqno);
-						pf->_ack++;
 					}
 					pf = pf->_pnext;
 				}
