@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update 
+2023.7.5 add vstream::clear()
 2023.5.15 add vstream
 
 stream
@@ -244,7 +245,10 @@ namespace ec
 			_pos = pos > usize ? usize : pos;
 			return *this;
 		}
-
+		inline void clear() {
+			_pos = 0;
+			string_< ec_string_alloctor, uint32_t, uint8_t>::clear();
+		}
 		inline void postoend() noexcept
 		{
 			_pos = size();

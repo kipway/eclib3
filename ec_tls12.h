@@ -185,8 +185,8 @@ namespace ec
 				_srv_certificate.reserve(4000);
 			}
 		public:
-			ec::bytes _srv_hello, _srv_certificate, _srv_hellodone;
-			ec::bytes _cli_hello, _cli_key_exchange, _cli_finished;
+			ec::vstream _srv_hello, _srv_certificate, _srv_hellodone;
+			ec::vstream _cli_hello, _cli_key_exchange, _cli_finished;
 		public:
 			_USE_EC_OBJ_ALLOCATOR
 			template<class _Out>
@@ -650,24 +650,23 @@ namespace ec
 					return false;
 				_hmsg->_cli_hello.clear();
 				try {
-					_hmsg->_cli_hello.push_back((uint8_t)tls::hsk_client_hello);  // message type 1byte
-					_hmsg->_cli_hello.append(3, (uint8_t)0); // message length 3byte
-					_hmsg->_cli_hello.append(1, (uint8_t)TLSVER_MAJOR).append(1, (uint8_t)TLSVER_NINOR);// version 2 bytes
-					_hmsg->_cli_hello.append(_clientrand, 32);// random 32byte
-					_hmsg->_cli_hello.push_back((uint8_t)0);  // SessionID = NULL   1byte
-					
-					_hmsg->_cli_hello.append(1, 0).append(1, 8) // cipher_suites<2..2^16-2>
-						.append(1, 0).append(1, (uint8_t)TLS_RSA_WITH_AES_256_CBC_SHA256)
-						.append(1, 0).append(1, (uint8_t)TLS_RSA_WITH_AES_128_CBC_SHA256)
-						.append(1, 0).append(1, (uint8_t)TLS_RSA_WITH_AES_256_CBC_SHA)
-						.append(1, 0).append(1, (uint8_t)TLS_RSA_WITH_AES_128_CBC_SHA);
-					_hmsg->_cli_hello.append(1, 1).append(1, 0); // compression_methods<1..2^8-1>
+					_hmsg->_cli_hello << ((uint8_t)tls::hsk_client_hello);  // msg type 1byte
+					_hmsg->_cli_hello << ((uint8_t)0) << (uint16_t)0; // msg len 3byte
+					_hmsg->_cli_hello << (uint8_t)TLSVER_MAJOR << (uint8_t)TLSVER_NINOR;
+					_hmsg->_cli_hello.write(_clientrand, 32);// random 32byte
+					_hmsg->_cli_hello << (uint8_t)0;    // SessionID = NULL   1byte
+					_hmsg->_cli_hello < (uint16_t)0x08; // 4 cipher_suites
+					_hmsg->_cli_hello < (uint16_t)TLS_RSA_WITH_AES_256_CBC_SHA256;
+					_hmsg->_cli_hello < (uint16_t)TLS_RSA_WITH_AES_128_CBC_SHA256;
+					_hmsg->_cli_hello < (uint16_t)TLS_RSA_WITH_AES_256_CBC_SHA;
+					_hmsg->_cli_hello < (uint16_t)TLS_RSA_WITH_AES_128_CBC_SHA;
+					_hmsg->_cli_hello < (uint16_t)0x100; // compression_methods <1..2^8-1>
+					_hmsg->_cli_hello.setpos(2);
+					_hmsg->_cli_hello < (uint16_t)(_hmsg->_cli_hello.size() - 4);
 				}
 				catch (...) {
 					return false;
 				}
-
-				*(_hmsg->_cli_hello.data() + 3) = (uint8_t)(_hmsg->_cli_hello.size() - 4);
 				return make_package(pout, tls::rec_handshake, _hmsg->_cli_hello.data(), _hmsg->_cli_hello.size());
 			}
 
@@ -822,12 +821,13 @@ namespace ec
 				if (nbytes < 0)
 					return false;
 				_hmsg->_cli_key_exchange.clear();
-				uint8_t uh[6] = { (uint8_t)(tls::hsk_client_key_exchange), (uint8_t)(((uint32_t)(nbytes + 2) >> 16) & 0xFF),
-								  (uint8_t)(((uint32_t)(nbytes + 2) >> 8) & 0xFF), (uint8_t)((uint32_t)(nbytes + 2) & 0xFF),
-								  (uint8_t)(((uint32_t)nbytes >> 8) & 0xFF), (uint8_t)((uint32_t)nbytes & 0xFF)
+				uint8_t uh[6] = {
+					(uint8_t)(tls::hsk_client_key_exchange), // msgtype
+					(uint8_t)0, (uint8_t)(((uint32_t)(nbytes + 2) >> 8) & 0xFF), (uint8_t)((uint32_t)(nbytes + 2) & 0xFF), // 3bytes length
+					(uint8_t)(((uint32_t)nbytes >> 8) & 0xFF), (uint8_t)((uint32_t)nbytes & 0xFF) // 2byte  secrit premasterkey length
 				};
 				_hmsg->_cli_key_exchange.append(uh, 6);
-				_hmsg->_cli_key_exchange.append(out, nbytes);
+				_hmsg->_cli_key_exchange.append(out, nbytes); // secrit premasterkey
 				return make_package(po, tls::rec_handshake, _hmsg->_cli_key_exchange.data(), _hmsg->_cli_key_exchange.size());
 			}
 
@@ -1114,17 +1114,15 @@ namespace ec
 				RAND_bytes(_serverrand, sizeof(_serverrand));
 				_hmsg->_srv_hello.clear();
 				try {
-					_hmsg->_srv_hello.push_back((uint8_t)tls::hsk_server_hello);//message type 1 byte
-					_hmsg->_srv_hello.append(3, (uint8_t)0);// message length 3byte
-					_hmsg->_srv_hello.append(1, (uint8_t)TLSVER_MAJOR).append(1, (uint8_t)TLSVER_NINOR); // version
-					_hmsg->_srv_hello.append(_serverrand, 32);// random 32byte
-					_hmsg->_srv_hello.push_back((uint8_t)4); // SessionID<0..32> length = 4bytes, ucid
-					_hmsg->_srv_hello.append(1, (uint8_t)((_ucid >> 24) & 0xFF))
-						.append(1, (uint8_t)((_ucid >> 16) & 0xFF))
-						.append(1, (uint8_t)((_ucid >> 8) & 0xFF))
-						.append(1, (uint8_t)((_ucid >> 0) & 0xFF)); // session ID
-					_hmsg->_srv_hello.append(1, (uint8_t)0).append(1, (uint8_t)(_cipher_suite & 0xFF)); //cipher_suite 2 bytes
-					_hmsg->_srv_hello.append(1, 0);//compression_methods.null
+					_hmsg->_srv_hello << (uint8_t)tls::hsk_server_hello;
+					_hmsg->_srv_hello << (uint16_t)0 << (uint8_t)0;
+					_hmsg->_srv_hello << (uint8_t)TLSVER_MAJOR << (uint8_t)TLSVER_NINOR;
+					_hmsg->_srv_hello.write(_serverrand, 32);// random 32byte
+					_hmsg->_srv_hello << (uint8_t)4;
+					_hmsg->_srv_hello < _ucid;
+					_hmsg->_srv_hello << (uint8_t)0;
+					_hmsg->_srv_hello << (uint8_t)(_cipher_suite & 0xFF);
+					_hmsg->_srv_hello << (uint8_t)0;//compression_methods.null
 				}
 				catch (...) {
 					return false;

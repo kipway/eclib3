@@ -337,15 +337,6 @@ namespace ec
 				return *this;
 			return append(s, strlen(s));
 		}
-		/*string_& append(value_type c) noexcept
-		{
-			size_t zs = size();
-			if (recapacity(zs + 1)) {
-				_pstr[zs] = c;
-				setsize_(_pstr, zs + 1);
-			}
-			return *this;
-		}*/
 		string_& append(size_t n, value_type c) noexcept
 		{
 			size_t zs = size();
@@ -846,9 +837,9 @@ namespace ec
 	private:
 		uint32_t _size, _bufsize;
 		pointer _buf;
-	public:		
+	public:
 		fixstring_(void *pbuf, size_t bufsize) : _size(0)
-		{			
+		{
 			_bufsize = (uint32_t)bufsize;
 			_buf = (pointer)pbuf;
 			_buf[0] = 0;
