@@ -294,7 +294,7 @@ namespace ec
 					_outtype = out_null;
 			}
 			else
-				_outtype = out_std;
+				_outtype = out_null;
 			return 0;
 		}
 #ifdef _WIN32
@@ -373,6 +373,11 @@ namespace ec
 		out_type _outtype;
 	};
 
+	/**
+	 * @brief create logger
+	 * @param surl "udp://127.0.0.1:999/appid?level=dbg", "stdout", "null"
+	 * @return 
+	*/
 	inline ilog* ilog::create(const char* surl)
 	{
 		size_t pos = 0, zl = (surl && *surl) ? strlen(surl) : 0;

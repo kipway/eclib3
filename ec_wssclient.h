@@ -39,7 +39,7 @@ namespace ec
 		websocketclient _ws;
 	protected:
 		virtual void onwshandshake() = 0;
-		virtual void onwsdata(const uint8_t* p, int nbytes) = 0;
+		virtual int onwsdata(const uint8_t* p, int nbytes) = 0;//return 0:OK ; -1:error will disconnect;
 	public:
 		inline void initws(const char* srequrl, const char* shost, const char* sprotocol)
 		{
@@ -116,8 +116,11 @@ namespace ec
 					if (sendwsbytes(pkg.data(), (int)pkg.size(), WS_OP_PONG) < 0)
 						return;
 				}
-				else
-					onwsdata(pkg.data(), (int)pkg.size());
+				else {
+					nr = onwsdata(pkg.data(), (int)pkg.size());
+					if (nr < 0)
+						break;
+				}
 				pkg.clear();
 				nopcode = 0;
 				nr = _ws.doWsData(_rbuf, &pkg, &nopcode);

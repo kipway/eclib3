@@ -296,7 +296,7 @@ namespace ec
 		{
 			return _pstr;
 		}
-		const_pointer c_str() const noexcept
+		const char* c_str() const noexcept
 		{
 			if (!_pstr)
 				return "";// never return nullptr
