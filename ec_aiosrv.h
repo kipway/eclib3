@@ -395,7 +395,6 @@ namespace ec {
 			virtual void onAccept(int fd, const char* sip, uint16_t port, int fdlisten)
 			{
 				setkeepalive(fd);
-				_plog->add(CLOG_DEFAULT_DBG, "onAccept fd(%d), listenfd(%d)", fd, fdlisten);
 				psession pss = new session(&_sndbufblks, fd, fdlisten);
 				if (!pss)
 					return;

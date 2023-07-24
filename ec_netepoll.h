@@ -500,6 +500,8 @@ namespace ec {
 							uint16_t uport = 0;
 							char sip[48] = { 0 };
 							clientaddr.get(uport, sip, sizeof(sip));
+							_plog->add(CLOG_DEFAULT_INF, "fd(%d) accept from %s:%u at listen fd(%d)",
+								fdc, clientaddr.viewip(), uport, evt.data.fd);
 							onAccept(fdc, sip, uport, evt.data.fd);
 						}
 					}

@@ -287,7 +287,7 @@ namespace ec {
 					return httpwrite(fd, pPkg, 404, "not fund", html_404, strlen(html_404), "text/html");
 				}
 				if (_plog)
-					_plog->add(CLOG_DEFAULT_DBG, " fd(%d) http down file '%s' Content-Length=%jd rang %jd-%jd/%jd", 
+					_plog->add(CLOG_DEFAULT_DBG, "fd(%d) http down file '%s' Content-Length=%jd rang %jd-%jd/%jd", 
 						fd, sfile, sizeContent, lpos, (lpos + sizeContent - 1), lfilesize);
 				ec::aio::session* ps = getsession(fd);
 				if (!ps)
