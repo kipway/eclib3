@@ -2,7 +2,7 @@
 \file ec_alloctor.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.5.13
+\update 2023.7.25
 
 memory
 	eclib memory allocator for ec::string, ec::hashmap, and other small objects etc.
@@ -19,6 +19,8 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include <stdio.h>
 #include <memory.h>
 #include <assert.h>
+
+#define _ZLIB_SELF_ALLOC
 
 #ifndef _WIN32
 #include <malloc.h>

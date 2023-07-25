@@ -2,7 +2,7 @@
 \file ec_system.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.5.13
+\update 2023.7.25
 
 eclib, easy C/C++ Library,based on C++11
 
@@ -11,7 +11,7 @@ windows
 linux
 	GCC/G++ 4.8.5 and later, kernel version 3.10 and later
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -81,4 +81,3 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include <cstdio>
 #include <cstdint>
 
-#define _ZLIB_SELF_ALLOC
