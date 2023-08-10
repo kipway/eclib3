@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 update:
+2023.8.10 update net::url add _host
 2023.5.18 update net::url support string template arg
 2023.2.10 update net::url support none protocol
 2023.2.3  update net::url
@@ -786,8 +787,9 @@ namespace ec
 			bool parse(const char* surl, size_t urlsize)
 			{
 				clear();
-				size_t i = 0;
+				size_t i = 0,j = 0;
 				STR_ str;
+
 				_tochar(i, ':', surl, urlsize, _protocol);
 				if (_protocol.empty() || (i + 2 >= urlsize || surl[i] != '/' || surl[i + 1] != '/')) {
 					i = 0;
@@ -796,33 +798,54 @@ namespace ec
 				else
 					i += 2;
 				if (surl[i] == '[') { //ipv6
-					_tochar(i, '[', surl, urlsize, str);
-					str.clear();
+					++i;
 					_tochar(i, ']', surl, urlsize, str);
 					if (str.empty() || ec::net::get_ips_by_domain(str.c_str(), _ip, _ipv6) < 0)
 						return false;
+					_host.push_back('[');
+					_host.append(str.data(), str.size());
+					_host.push_back(']');
 					if (i < urlsize) {
 						if (surl[i] == ':') { //port
 							++i;
 							str.clear();
-							_tochar(i, '/', surl, urlsize, str);
-							if (!str.empty())
+							j = i;
+							if (!_tochar(i, '/', surl, urlsize, str)) {
+								i = j;
+								str.clear();
+								if (_tochar(i, '?', surl, urlsize, str))
+									--i;
+							}
+							if (!str.empty()) {
 								_port = atoi(str.c_str());
+								_host.push_back(':');
+								_host.append(str.data(), str.size());
+							}
+							else
+								return false;
 						}
 						else if (surl[i] == '/') // path
 							++i;
 					}
 				}
 				else { // ipv4 or hostname
-					_tochar(i, ':', surl, urlsize, str);
+					j = i;
+					if (!_tochar(i, '/', surl, urlsize, _host)) {
+						i = j;
+						_host.clear();
+						if (_tochar(i, '?', surl, urlsize, _host))
+							--i;
+					}
+					if (_host.empty())
+						return false;
+					j = 0;
+					_tochar(j, ':', _host.data(), _host.size(), str);
 					if (str.empty() || ec::net::get_ips_by_domain(str.c_str(), _ip, _ipv6) < 0)
 						return false;
-					if (surl[i - 1] == ':') { //port
-						str.clear();
-						_tochar(i, '/', surl, urlsize, str);
-						if (!str.empty())
-							_port = atoi(str.c_str());
-					}
+					str.clear();
+					_tochar(j, '\0', _host.data(), _host.size(), str);
+					if (!str.empty())
+						_port = atoi(str.c_str());
 				}
 				_tochar(i, '?', surl, urlsize, _path);
 				_tochar(i, '\n', surl, urlsize, _args);
@@ -836,18 +859,20 @@ namespace ec
 				_ipv6.clear();
 				_path.clear();
 				_args.clear();
+				_host.clear();
 			}
 
-			void _tochar(size_t& pos, char c, const char* surl, size_t urlsize, STR_& so)
-			{ // 从当前读取字符到so，直到遇到c(不包含), pos跳过c位置。
+			bool _tochar(size_t& pos, char c, const char* surl, size_t urlsize, STR_& so)
+			{ // 从当前读取字符到so，直到遇到c(不包含), pos跳过c位置,返回true表示找到c，false表示没有找到c,剩余部分全部全部复制到so
 				while (pos < urlsize) {
 					if (surl[pos] == c) {
 						++pos;
-						break;
+						return true;
 					}
 					so.push_back(surl[pos]);
 					++pos;
 				}
+				return false;
 			}
 			const char* ipstr()
 			{
@@ -864,6 +889,7 @@ namespace ec
 			STR_ _ipv6;
 			STR_ _path;
 			STR_ _args;
+			STR_ _host;
 		};
 
 		inline void setfd_cloexec(SOCKET fd)

@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update
+  2023.8.10 update ,add request failed http start line out to log
   2023.7.5  remove ec::memory
   2023.6.25 add sendPingMsgMsg
 ws_c
@@ -104,7 +105,9 @@ namespace ec
 				pkg.append("\r\n", 2);
 			}
 
-			sc = "Upgrade: websocket\r\nConnection: Upgrade\r\n";
+			sc = "Connection: Upgrade\r\nUpgrade: websocket\r\n";
+			pkg.append(sc, strlen(sc));
+			sc = "Sec-WebSocket-Version: 13\r\n";
 			pkg.append(sc, strlen(sc));
 
 			t_guid uid;
@@ -129,9 +132,6 @@ namespace ec
 				pkg.append("\r\n", 2);
 			}
 
-			sc = "Sec-WebSocket-Version: 13\r\n";
-			pkg.append((const uint8_t*)sc, strlen(sc));
-
 			sc = "Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n";
 			pkg.append(sc, strlen(sc));
 
@@ -154,9 +154,10 @@ namespace ec
 			char sacp[40];
 			if (!htp.GetHeadFiled("Sec-WebSocket-Accept", sacp, sizeof(sacp))
 				|| !ec::streq(sacp, _sb64ret)) {
-				if (_plog)
-					_plog->add(CLOG_DEFAULT_ERR, "Sec-WebSocket-Accept failed");
-
+				if (_plog) {
+					int nout = rin.size_() > 200 ? 200 : (int)rin.size_();
+					_plog->add(CLOG_DEFAULT_ERR, "Sec-WebSocket-Accept failed\n%.*s", nout, (const char*)rin.data_());
+				}
 				return -1;
 			}
 			if (htp.CheckHeadFiled("Sec-WebSocket-Extensions", "permessage-deflate"))

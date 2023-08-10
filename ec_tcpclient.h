@@ -2,7 +2,8 @@
 \file ec_tcpclient.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.1.30
+\update
+  2023.8.10 add send timeout micro define
 
 tcp_c
 	a class for tcp client, support socks5 proxy, asynchronous connection
@@ -19,6 +20,9 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include <time.h>
 #include "ec_string.h"
 #include "ec_netio.h"
+#ifndef EC_TCP_CLIENT_SND_TIMEOUTSEC
+#define EC_TCP_CLIENT_SND_TIMEOUTSEC 4 // second
+#endif
 namespace ec
 {
 	class tcp_c
@@ -142,21 +146,28 @@ namespace ec
 			return true;
 		}
 
-		void close()
+		void close(int notify = 1)
 		{
 			if (INVALID_SOCKET != _sock) {
 				::closesocket(_sock);
 				_sock = INVALID_SOCKET;
 				_status = st_invalid;
-				ondisconnected();
+				if(notify)
+					ondisconnected();
 			}
 		}
 
+		/**
+		 * @brief send synchronously 
+		 * @param p data
+		 * @param nlen datasize
+		 * @return the number of bytes sent; -1: error and close connection; < nlen : timeout
+		*/
 		virtual int sendbytes(const void* p, int nlen)
 		{
 			if (INVALID_SOCKET == _sock || _status < st_connected)
 				return -1;
-			int ns = net::tcpsend(_sock, p, nlen);
+			int ns = net::tcpsend(_sock, p, nlen, EC_TCP_CLIENT_SND_TIMEOUTSEC * 1000);
 			if (ns < 0)
 				close();
 			return ns;

@@ -6,6 +6,7 @@ Asynchronous http/ws session
 
 \author  jiangyong
 \update 
+  2023-8-10 update DoUpgradeWebSocket() logout infomation
   2023-5-21 update for http download big file
 
 eclib 3.0 Copyright (c) 2017-2023, kipway
@@ -69,15 +70,9 @@ namespace ec {
 			bool DoUpgradeWebSocket(int nfd, const char* skey, ec::http::package* pPkg, ec::ilog* plog)
 			{
 				if (plog) {
-					char stmp[128] = { 0 };
-					str1k sa;
-					if (pPkg->GetHeadFiled("Origin", stmp, sizeof(stmp))) {
-						sa.append("\n\tOrigin: ").append(stmp);
-					}
-					if (pPkg->GetHeadFiled("Sec-WebSocket-Extensions", stmp, sizeof(stmp))) {
-						sa.append("\n\tSec-WebSocket-Extensions: ").append(stmp);
-					}
-					plog->add(CLOG_DEFAULT_MOR, "ucid(%u) upgrade websocket%s", nfd, sa.c_str());
+					ec::string hedinfo;
+					pPkg->headinfo(hedinfo);
+					plog->add(CLOG_DEFAULT_DBG, "ucid(%u) upgrade websocket:\n%s", nfd, hedinfo.c_str());
 				}
 				char sProtocol[128] = { 0 }, sVersion[128] = { 0 }, tmp[256] = { 0 }, sha1out[20] = { 0 }, base64out[32] = { 0 };
 				pPkg->GetHeadFiled("Sec-WebSocket-Protocol", sProtocol, sizeof(sProtocol));

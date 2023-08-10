@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update 
+2023.8.10 add nul end in debug
 2023.6.26 Optimize ec::string_::append() compatibility 
 2023.5.25 add fixstring_
 2023.5.13 use ec_malloc
@@ -121,6 +122,9 @@ namespace ec
 				return;
 			t_h* ph = (t_h*)(pstr - sizeof(t_h));
 			ph->sizedata = (size_type)zlen;
+#ifdef _DEBUG
+			_pstr[zlen] = 0;
+#endif
 		}
 		size_t ssize(const_pointer pstr) const
 		{

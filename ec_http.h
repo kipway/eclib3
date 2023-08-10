@@ -2,7 +2,8 @@
 \file ec_http.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.5.30
+\update 
+2023.8.10 add ec::http::package::headinfo()
 2023.5.30 update mimecfg
 2023.5.13 use zlibe self memory allocator
 classes for HTTP protocol parse
@@ -519,6 +520,18 @@ namespace ec
 				_req.clear();
 				_body.clear();
 				_head.clear();
+			}
+			template<class _STR = std::string>
+			void headinfo(_STR& vs) //output http heade to string
+			{
+				vs.reserve(1000);
+				for (auto& i : _head) {
+					vs.push_back('\t');
+					vs.append(i._key._s, i._key._size);
+					vs.append(": ");
+					vs.append(i._val._s, i._val._size);
+					vs.push_back('\n');
+				}
 			}
 			int parse(const char* s, size_t size)// return <0 : error ; 0 : e_wait; >0 : package size
 			{

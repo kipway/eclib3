@@ -4,6 +4,7 @@
 实现一个基于udp多通道并行的可靠传输的封装，取名为ucpx;
 
 \author jiangyong
+\update 2023-7-28 修正阻断超时删除
 \update 2023-6-22 优化重发
 \update 2023-6-12 优化确认和重发
 \update 2023-2-7 增加ipv6支持
@@ -801,6 +802,7 @@ namespace ec {
 			ec::vector<seqno_t> _seqnos;//重复使用的多seqno确认处理缓冲区
 		public:
 			int _sstype; //会话类型; 0接入; 1连出
+			int64_t  _time_create; //创建时间,1970-1-1的GMT毫秒数
 			int64_t  _time_lastread; //最后一次接收报文时间,1970-1-1的GMT毫秒数
 			int64_t  _time_lastsend; //最后一次发送报文时间,1970-1-1的GMT毫秒数
 			int _forceack2; //设置需要应答sck to标志
@@ -819,6 +821,7 @@ namespace ec {
 			{
 				_time_lastread = ec::mstime();
 				_time_lastsend = _time_lastread;
+				_time_create = _time_lastread;
 				_forceack2 = 0;
 				_seqnos.reserve(SIZE_UDPCONTENT/sizeof(seqno_t));
 				memset(_guid, 0, sizeof(_guid));
@@ -1177,11 +1180,8 @@ namespace ec {
 				ssids.reserve(32);
 
 				for (auto& i : _map) {
-					if (i->getnxtsndno() != 1u || i->getnxtrcvno() != 1u)
-						continue;
-					if (curms - i->_time_lastread < mseconds || curms - i->_time_lastsend < mseconds)
-						continue;
-					ssids.push_back(i->get_ssid());
+					if (i->getnxtrcvno() == 1u && llabs(curms - i->_time_create) >= mseconds)
+						ssids.push_back(i->get_ssid());
 				}
 				for (auto& i : ssids) {
 					_map.erase(i, [&](PSOCKET& p) {
