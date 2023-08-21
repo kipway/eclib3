@@ -161,15 +161,17 @@ namespace ec
 		 * @brief send synchronously 
 		 * @param p data
 		 * @param nlen datasize
-		 * @return the number of bytes sent; -1: error and close connection; < nlen : timeout
+		 * @return the number of bytes sent; -1: error and close connection;
 		*/
 		virtual int sendbytes(const void* p, int nlen)
 		{
 			if (INVALID_SOCKET == _sock || _status < st_connected)
 				return -1;
 			int ns = net::tcpsend(_sock, p, nlen, EC_TCP_CLIENT_SND_TIMEOUTSEC * 1000);
-			if (ns < 0)
+			if (ns < nlen) {
 				close();
+				return -1;
+			}
 			return ns;
 		}
 
