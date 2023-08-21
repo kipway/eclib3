@@ -1021,7 +1021,7 @@ namespace ec
 						if (!OnServerFinished(p, ulen + 4, pout))
 							return TLS_SESSION_ERR;
 						if (_plog)
-							_plog->add(CLOG_DEFAULT_DBG, "TLS client server hsk_finished chech success");
+							_plog->add(CLOG_DEFAULT_DBG, "TLS client server hsk_finished check success");
 						_bhandshake_finished = true;
 						nret = TLS_SESSION_HKOK;
 						break;

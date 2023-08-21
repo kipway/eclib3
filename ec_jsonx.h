@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update
+  2023.8.17 Support jbool and jnull
   2023.5.25 Support RFC8259 full JSON escaping
   2023.5.18 add get_jstring another version
   2023.2.19 update get_jtime
@@ -42,7 +43,9 @@ namespace ec
 			jstring = 0,
 			jobj = 1,
 			jarray = 2,
-			jnumber = 3
+			jnumber = 3,
+			jbool = 4,
+			jnull = 5
 		};
 
 		struct t_kv {
@@ -230,6 +233,8 @@ namespace ec
 			val = 0;
 			if (!pkv || pkv->_v.empty())
 				return false;
+			if (jnull == pkv->_type)
+				return true;
 			if (std::is_integral<_VAL>::value) {
 				val = (_VAL)pkv->_v.stoll();
 				if (!val && (pkv->_v.ieq("true") || pkv->_v.ieq("yes")))
@@ -248,6 +253,8 @@ namespace ec
 			val.clear();
 			if (!pkv)
 				return false;
+			if (jnull == pkv->_type)
+				return true;
 			ec::jstr_fromesc(pkv->_v._str, pkv->_v._size, val);
 			return true;
 		}
@@ -260,6 +267,8 @@ namespace ec
 			val.clear();
 			if (!pkv)
 				return false;
+			if (jnull == pkv->_type)
+				return true;
 			ec::jstr_fromesc(pkv->_v._str, pkv->_v._size, val);
 			return true;
 		}
@@ -273,6 +282,8 @@ namespace ec
 			pkv = getkv(key);
 			if (!pkv)
 				return false;
+			if (jnull == pkv->_type)
+				return true;
 			ec::fixstring varstr(sout, outsize);
 			ec::jstr_fromesc(pkv->_v._str, pkv->_v._size, varstr);
 			return true;
@@ -283,9 +294,11 @@ namespace ec
 		{
 			const ec::json::t_kv* pkv;
 			pkv = getkv(key);
-			if (!pkv || pkv->_v.empty())
+			if (!pkv)
+				return false;
+			if (pkv->_v.empty() || jnull == pkv->_type)
 				return true;
-			if (pkv->_type != ec::json::jarray)
+			if (pkv->_type != jarray)
 				return false;
 
 			ec::json jvs;
@@ -308,9 +321,11 @@ namespace ec
 		{
 			const ec::json::t_kv* pkv;
 			pkv = getkv(key);
-			if (!pkv || pkv->_v.empty())
+			if (!pkv)
+				return false;
+			if (pkv->_v.empty() || jnull == pkv->_type)
 				return true;
-			if (pkv->_type != ec::json::jarray)
+			if (pkv->_type != jarray)
 				return false;
 
 			ec::json jvs;
@@ -334,9 +349,11 @@ namespace ec
 		{
 			const ec::json::t_kv* pkv;
 			pkv = getkv(key);
-			if (!pkv || pkv->_v.empty())
+			if (!pkv)
+				return false;
+			if (pkv->_v.empty() || jnull == pkv->_type)
 				return true;
-			if (pkv->_type != ec::json::jobj)
+			if (pkv->_type != jobj)
 				return false;
 
 			ec::json jvs, jv;
@@ -350,9 +367,11 @@ namespace ec
 		{
 			const ec::json::t_kv* pkv;
 			pkv = getkv(key);
-			if (!pkv || pkv->_v.empty())
+			if (!pkv)
+				return false;
+			if (pkv->_v.empty() || ec::json::jnull == pkv->_type)
 				return true;
-			if (pkv->_type != ec::json::jarray)
+			if (pkv->_type != jarray)
 				return false;
 
 			ec::json jvs, jv;
@@ -373,7 +392,9 @@ namespace ec
 			const ec::json::t_kv* pkv;
 			pkv = getkv(key);
 			val.clear();
-			if (!pkv || pkv->_v.empty())
+			if (!pkv)
+				return false;
+			if (pkv->_v.empty() || jnull == pkv->_type)
 				return true;
 
 			ec::autobuf<> b64(modp_b64_decode_len(pkv->_v._size));
@@ -422,6 +443,23 @@ namespace ec
 			return true;
 		}
 
+		bool get_jbool(const char* key, bool& val)
+		{
+			const ec::json::t_kv* pkv;
+			pkv = getkv(key);
+			if (!pkv || pkv->_v.empty()) {
+				val = false;
+				return false;
+			}
+			if (jbool == pkv->_type || jstring == pkv->_type)
+				val = pkv->_v.eq("true");
+			else if (jnumber == pkv->_type) {
+				val = (0 != pkv->_v.stoll());
+			}
+			else
+				val = jnull != pkv->_type ? true : false;
+			return true;
+		}
 	private:
 		bool from_obj(txt& s, const char* keyend = nullptr)
 		{
@@ -485,6 +523,14 @@ namespace ec
 					if (!s.json_tochar(",}\n\x20\t"))
 						return false;
 					it._v._size = s._str - it._v._str;
+					if (4 == it._v._size) {
+						if(it._v.eq("true"))
+							it._type = jbool;
+						else if(it._v.eq("null"))
+							it._type = jnull;
+					}
+					else if(5 == it._v._size && it._v.eq("false"))
+						it._type = jbool;
 				}
 				_kvs.push_back(it);
 				if (keyend && it._k.ieq(keyend))
@@ -669,6 +715,28 @@ namespace ec
 			sout.push_back('"');
 		}
 
+		template<typename _STROUT>
+		void out_jstring(int& nf, const char* key, const char* val, _STROUT& sout)
+		{
+			if (!val || !*val)
+				return;
+			size_t sizeval = strlen(val);
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			sout.append(key).append("\":\"");
+			if (!ec::jstr_needesc(val, sizeval)) {
+				sout.append(val, sizeval).push_back('"');
+				return;
+			}
+
+			const char* s = val, * se = s + sizeval;
+			while (s < se) {
+				ec::outJsonEsc(*s++, sout);
+			}
+			sout.push_back('"');
+		}
 		template<typename _Tp, class _STR, class = typename std::enable_if<std::is_integral<_Tp>::value&& std::is_signed<_Tp>::value>>
 		void number_outstring(_Tp v, _STR& sout) // 4x speed vs sprintf @linux-g++ 4.8.5;  6x speed vs sprintf @win-vc2017; 
 		{
@@ -916,6 +984,29 @@ namespace ec
 			int nc = ec::encode_base64(b64.data(), (const char*)val.data(), (int)val.size());
 			sout.append(b64.data(), nc);
 			sout.push_back('"');
+		}
+
+		template<typename _STROUT>
+		void out_jbool(int& nf, const char* key, bool val, _STROUT& sout)
+		{
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			if(val)
+				sout.append(key).append("\":true");
+			else
+				sout.append(key).append("\":false");
+		}
+
+		template<typename _STROUT>
+		void out_jnull(int& nf, const char* key, _STROUT& sout)
+		{
+			if (nf)
+				sout.push_back(',');
+			++nf;
+			sout.push_back('"');
+			sout.append(key).append("\":null");
 		}
 	}//js
 }// ec

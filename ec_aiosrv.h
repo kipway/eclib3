@@ -63,7 +63,14 @@ namespace ec {
 			virtual ~netserver() {
 				_mapsession.clear();
 			}
-
+			inline void setLog(ec::ilog* plog)
+			{
+				_plog = plog;
+			}
+			inline ec::ilog* getLog()
+			{
+				return _plog;
+			}
 #if (0 != EC_AIOSRV_TLS)
 			bool initca(const char* filecert, const char* filerootcert, const char* fileprivatekey)
 			{
