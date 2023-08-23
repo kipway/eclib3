@@ -74,6 +74,14 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 namespace ec
 {
 	namespace net {
+		inline void setfd_cloexec(SOCKET fd)
+		{
+#ifndef _WIN32
+			int flags = fcntl(fd, F_GETFD);
+			flags |= FD_CLOEXEC;
+			fcntl(fd, F_SETFD, flags);
+#endif
+		}
 		class socketaddr
 		{
 		private:
@@ -413,7 +421,7 @@ namespace ec
 			SOCKET s = socket(srvaddr.sa_family(), SOCK_STREAM, IPPROTO_TCP);
 			if (s == INVALID_SOCKET)
 				return INVALID_SOCKET;
-
+			setfd_cloexec(s);
 			long ul = 1; // set none block
 #ifdef _WIN32
 			if (SOCKET_ERROR == ioctlsocket(s, FIONBIO, (unsigned long*)&ul)) {
@@ -477,9 +485,8 @@ namespace ec
 
 			if (s == INVALID_SOCKET)
 				return INVALID_SOCKET;
-
+			setfd_cloexec(s);
 			long ul = 1;
-
 			if (ioctl(s, FIONBIO, &ul) == -1) {
 				closesocket(s);
 				return INVALID_SOCKET;
@@ -655,6 +662,7 @@ namespace ec
 			SOCKET s = socket(srvaddr.sa_family(), SOCK_STREAM, IPPROTO_TCP);
 			if (s == INVALID_SOCKET)
 				return INVALID_SOCKET;
+			setfd_cloexec(s);
 			long ul = 1;
 #ifdef _WIN32
 			if (SOCKET_ERROR == ioctlsocket(s, FIONBIO, (unsigned long*)&ul)) {
@@ -891,14 +899,5 @@ namespace ec
 			STR_ _args;
 			STR_ _host;
 		};
-
-		inline void setfd_cloexec(SOCKET fd)
-		{
-#ifndef _WIN32
-			int flags = fcntl(fd, F_GETFD);
-			flags |= FD_CLOEXEC;
-			fcntl(fd, F_SETFD, flags);
-#endif
-		}
 	}//net
 }// ec
