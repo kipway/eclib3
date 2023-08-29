@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update
+2023.8.23 add run in console for windows
 2023.2.13 add run in console for linux
 
 service frame for windows and Linux
@@ -86,6 +87,7 @@ EC_SERVICE_FRAME(CRunCls, g_service, g_spid, g_damonmsgkey, g_sbuild, g_sver)
 #include "tchar.h"
 #include <conio.h>
 #include <Windows.h>
+#include <shellapi.h>
 
 namespace ec {
 	template <class _CLS>
@@ -169,7 +171,17 @@ namespace ec {
 			};
 			StartServiceCtrlDispatcher(st);	
 		};
-
+		void docmd()
+		{
+			_CLS* pcls = new _CLS();
+			if (pcls) {
+				INT argc = 0;
+				LPSTR* argv = CommandLineToArgvA(&argc);
+				pcls->docmd(argc, argv);
+				LocalFree(argv);
+				delete pcls;
+			}
+		}
 		BOOL IsInstalled()
 		{
 			BOOL bResult = FALSE;
@@ -330,6 +342,61 @@ namespace ec {
 		{
 			CNtService::_pobj->Handler(dwOpcode);
 		}
+		LPSTR* CommandLineToArgvA(INT* pNumArgs)
+		{
+			int retval;
+
+			int numArgs;
+			LPWSTR* args;
+			args = CommandLineToArgvW(GetCommandLineW(), &numArgs);
+			if (args == NULL)
+				return NULL;
+
+			int storage = numArgs * sizeof(LPSTR);
+			for (int i = 0; i < numArgs; ++i)
+			{
+				BOOL lpUsedDefaultChar = FALSE;
+				retval = WideCharToMultiByte(CP_ACP, 0, args[i], -1, NULL, 0, NULL, &lpUsedDefaultChar);
+				if (!SUCCEEDED(retval))
+				{
+					LocalFree(args);
+					return NULL;
+				}
+
+				storage += retval;
+			}
+
+			LPSTR* result = (LPSTR*)LocalAlloc(LMEM_FIXED, storage);
+			if (result == NULL)
+			{
+				LocalFree(args);
+				return NULL;
+			}
+
+			int bufLen = storage - numArgs * sizeof(LPSTR);
+			LPSTR buffer = ((LPSTR)result) + numArgs * sizeof(LPSTR);
+			for (int i = 0; i < numArgs; ++i)
+			{
+				assert(bufLen > 0);
+				BOOL lpUsedDefaultChar = FALSE;
+				retval = WideCharToMultiByte(CP_ACP, 0, args[i], -1, buffer, bufLen, NULL, &lpUsedDefaultChar);
+				if (!SUCCEEDED(retval))
+				{
+					LocalFree(result);
+					LocalFree(args);
+					return NULL;
+				}
+
+				result[i] = buffer;
+				buffer += retval;
+				bufLen -= retval;
+			}
+
+			LocalFree(args);
+
+			*pNumArgs = numArgs;
+			return result;
+		}
 	protected:
 		void Run()
 		{
@@ -443,12 +510,14 @@ LPCTSTR FindOneOf(LPCTSTR p1, LPCTSTR p2){\
 	return NULL;\
 }\
 \
-void ShowMsg()\
+void ShowMsg(bool binstinfo)\
 {\
 	TCHAR smsg[1024]={0};\
-	_tcscpy(smsg, _T("please install first \n"));\
-	_tcscat(smsg, SSERVICE);\
-	_tcscat(smsg, _T(" -install\n"));\
+	if(binstinfo){\
+		_tcscpy(smsg, _T("please install first \n"));\
+		_tcscat(smsg, SSERVICE);\
+		_tcscat(smsg, _T(" -install\n"));\
+	}\
 	_tcscat(smsg, SBUILD);\
 	_tcscat(smsg, _T(" \n"));\
 	_tcscat(smsg, SVER);\
@@ -466,7 +535,7 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,\
 	TCHAR szTokens[] = _T("-/");\
 	LPCTSTR lpszToken = FindOneOf(lpCmdLine, szTokens);\
 	if (lpszToken == NULL) {\
-		ShowMsg();\
+		ShowMsg(true);\
 		return 0;\
 	}\
 	else {\
@@ -480,8 +549,12 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,\
 			_server.Start();\
 			return 0;\
 		}\
+		else if (!lstrcmpi(lpszToken, _T("version")) || !lstrcmpi(lpszToken, _T("ver"))) {\
+			ShowMsg(false);\
+			return 0;\
+		}\
 		else\
-			ShowMsg();\
+			_server.docmd();\
 	}\
 	return 0;\
 }\
