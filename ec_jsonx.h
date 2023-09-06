@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update
+  2023.9.5  fix number_outstring(double v, _STR& sout)
   2023.8.17 Support jbool and jnull
   2023.5.25 Support RFC8259 full JSON escaping
   2023.5.18 add get_jstring another version
@@ -804,7 +805,7 @@ namespace ec
 					fpart += (10 - fpart % 10);
 					if (10000000 == fpart) {
 						fpart = 0;
-						vi = v < 0 ? vi - 1 : vi + 1;
+						vi += 1;
 					}
 				}
 				else if (fpart % 10)
