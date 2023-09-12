@@ -2,11 +2,12 @@
 \file ec_file.h
 \author	kipway@outlook.com
 \update 
+2023.9.12 Fix OF_APPEND_DATA for windows
 2023.5.13 use self memory allocator
 
 eclib file class
 
-eclib3 Copyright (c) 2017-2022, kipway
+eclib3 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway/eclib
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -141,7 +142,7 @@ namespace ec
 			if (nOpenFlags & OF_SYNC)
 				dwFlags |= FILE_FLAG_WRITE_THROUGH;
 			if (nOpenFlags & OF_APPEND_DATA)
-				dwAccess = FILE_APPEND_DATA | SYNCHRONIZE;
+				dwAccess = GENERIC_WRITE | FILE_APPEND_DATA;
 			HANDLE hFile = ::CreateFileW(sfile, dwAccess, dwShareMode, &sa,
 				dwCreateFlag, dwFlags, NULL);
 
