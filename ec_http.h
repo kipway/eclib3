@@ -2,13 +2,14 @@
 \file ec_http.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 
+\update
+2023.9.25 add define EC_HTTP_STARTHEAD_LINESIZE
 2023.8.10 add ec::http::package::headinfo()
 2023.5.30 update mimecfg
 2023.5.13 use zlibe self memory allocator
 classes for HTTP protocol parse
 
-eclib 3.0 Copyright (c) 2017-2020, kipway
+eclib 3.0 Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,6 +29,10 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 
 #ifndef MAXSIZE_RCVHTTPBODY
 #define MAXSIZE_RCVHTTPBODY (1024 * 1024)
+#endif
+
+#ifndef EC_HTTP_STARTHEAD_LINESIZE
+#define EC_HTTP_STARTHEAD_LINESIZE 4000
 #endif
 
 namespace ec
@@ -396,13 +401,13 @@ namespace ec
 						_s += 2;
 						_size -= 2u;
 						pout->_size += 2u;
-						return (pout->_size > 1024) ? e_linesize : (int)pout->_size;
+						return (pout->_size > EC_HTTP_STARTHEAD_LINESIZE) ? e_linesize : (int)pout->_size;
 					}
 					_s++;
 					_size--;
 					pout->_size++;
 				}
-				return (pout->_size > 1024) ? e_linesize : e_wait;
+				return (pout->_size > EC_HTTP_STARTHEAD_LINESIZE) ? e_linesize : e_wait;
 			}
 			int skip()// skip char \x20 , \t , \r, \n
 			{

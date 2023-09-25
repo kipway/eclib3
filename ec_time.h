@@ -221,9 +221,17 @@ namespace ec
 			if (!ec::localtime_(&t, (time_t)(ltime / 1000)))
 				return nullptr;
 		}
-		size_t n = (size_t)snprintf(sout, outsize, "%d-%02d-%02dT%02d:%02d:%02d.%03d",
-			t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
-			t.tm_hour, t.tm_min, t.tm_sec, (int)(ltime % 1000));
+		size_t n = 0;
+		if (ltime % 1000) {
+			n = (size_t)snprintf(sout, outsize, "%d-%02d-%02dT%02d:%02d:%02d.%03d",
+				t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+				t.tm_hour, t.tm_min, t.tm_sec, (int)(ltime % 1000));
+		}
+		else {
+			n = (size_t)snprintf(sout, outsize, "%d-%02d-%02dT%02d:%02d:%02d",
+				t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+				t.tm_hour, t.tm_min, t.tm_sec);
+		}
 
 		if (isutc) {
 			if ( n + 1 >= outsize) {
@@ -247,7 +255,7 @@ namespace ec
 					return nullptr;
 				}
 				sout[n++] = (timez < 0) ? '+' : '-';
-				sout[n++] = abs(timez) / 10 ? '0' + abs(timez) / 10 : '0';
+				sout[n++] = (abs(timez) / 10) ? '0' + abs(timez) / 10 : '0';
 				sout[n++] = '0' + abs(timez) % 10;
 				sout[n++] = ':';
 				sout[n++] = '0';
@@ -498,7 +506,7 @@ namespace ec
 				sout[n++] = 'Z';
 			else {
 				sout[n++] = (timez < 0) ? '+' : '-';
-				sout[n++] = abs(timez) / 10 ? '0' + abs(timez) / 10 : '0';
+				sout[n++] = (abs(timez) / 10) ? '0' + abs(timez) / 10 : '0';
 				sout[n++] = '0' + abs(timez) % 10;
 				sout[n++] = ':';
 				sout[n++] = '0';
@@ -615,7 +623,7 @@ namespace ec
 				sout[n++] = 'Z';
 			else {
 				sout[n++] = (timez < 0) ? '+' : '-';
-				sout[n++] = abs(timez) / 10 ? '0' + abs(timez) / 10 : '0';
+				sout[n++] = (abs(timez) / 10) ? '0' + abs(timez) / 10 : '0';
 				sout[n++] = '0' + abs(timez) % 10;
 				sout[n++] = ':';
 				sout[n++] = '0';
