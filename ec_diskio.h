@@ -2,7 +2,8 @@
 \file ec_diskio.h
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.5.19
+\update
+  2023.9.27 add ec::io::rmdir(),update path length from 512 to 1024
 
 io
 	tools for disk IO，use utf-8 parameters
@@ -52,7 +53,7 @@ namespace ec
 		{
 #ifdef _WIN32
 			UINT codepage = ec::strisutf8(utf8file) ? CP_UTF8 : CP_ACP;
-			wchar_t sfile[512], smode[32];
+			wchar_t sfile[1024], smode[32];
 			sfile[0] = 0;
 			smode[0] = 0;
 			if (!MultiByteToWideChar(codepage, 0, utf8file, -1, sfile, sizeof(sfile) / sizeof(wchar_t))
@@ -68,7 +69,7 @@ namespace ec
 		inline int remove(const char* utf8filename)
 		{
 #ifdef _WIN32
-			wchar_t sfile[512];
+			wchar_t sfile[1024];
 			sfile[0] = 0;
 			if (!MultiByteToWideChar(ec::strisutf8(utf8filename) ? CP_UTF8 : CP_ACP, 0, utf8filename, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
 				return -1;
@@ -78,10 +79,23 @@ namespace ec
 #endif
 		}
 
+		inline int rmdir(const char* utf8filename)
+		{
+#ifdef _WIN32
+			wchar_t sfile[1024];
+			sfile[0] = 0;
+			if (!MultiByteToWideChar(ec::strisutf8(utf8filename) ? CP_UTF8 : CP_ACP, 0, utf8filename, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
+				return -1;
+			return ::_wrmdir(sfile);
+#else
+			return ::rmdir(utf8filename);
+#endif
+		}
+
 #ifdef _WIN32
 		inline bool exist(const char* utf8filename)
 		{
-			wchar_t sfile[512];
+			wchar_t sfile[1024];
 			sfile[0] = 0;
 			if (!MultiByteToWideChar(ec::strisutf8(utf8filename) ? CP_UTF8 : CP_ACP, 0, utf8filename, -1, sfile, sizeof(sfile) / sizeof(wchar_t))
 				|| _waccess(sfile, 0))
@@ -93,8 +107,8 @@ namespace ec
 		{
 			UINT codepage = ec::strisutf8(utf8path) ? CP_UTF8 : CP_ACP;
 			int i = 0;
-			char szt[512];
-			wchar_t sdir[512];
+			char szt[1024];
+			wchar_t sdir[1024];
 			sdir[0] = 0;
 
 			szt[0] = 0;
@@ -125,7 +139,7 @@ namespace ec
 
 		inline long long getdiskspace(const char* utf8path) // lpszDisk format is "c:\"
 		{
-			wchar_t wpath[512];
+			wchar_t wpath[1024];
 			if (!MultiByteToWideChar(ec::strisutf8(utf8path) ? CP_UTF8 : CP_ACP, 0, utf8path, -1, wpath, sizeof(wpath) / sizeof(wchar_t)))
 				return 0;
 			ULARGE_INTEGER ullFreeBytesAvailable, ullTotalNumberOfBytes, ullTotalNumberOfFreeBytes;
@@ -147,7 +161,7 @@ namespace ec
 
 		inline bool filestat(const char* utf8file, t_stat *pout)
 		{
-			wchar_t wfile[512];
+			wchar_t wfile[1024];
 			if (!MultiByteToWideChar(ec::strisutf8(utf8file) ? CP_UTF8 : CP_ACP, 0, utf8file, -1, wfile, sizeof(wfile) / sizeof(wchar_t)))
 				return false;
 			struct __stat64 statbuf;
@@ -164,7 +178,7 @@ namespace ec
 		template<class _Out = std::string>
 		bool getappname(_Out &utf8name)
 		{
-			wchar_t sFilename[512];
+			wchar_t sFilename[1024];
 			wchar_t sDrive[_MAX_DRIVE];
 			wchar_t sDir[_MAX_DIR];
 			wchar_t sFname[_MAX_FNAME];
@@ -184,7 +198,7 @@ namespace ec
 		template<class _Out = std::string>
 		bool getexepath(_Out& utf8path) // last char is '/'
 		{
-			wchar_t sFilename[512];
+			wchar_t sFilename[1024];
 			wchar_t sDrive[_MAX_DRIVE];
 			wchar_t sDir[_MAX_DIR];
 			wchar_t sFname[_MAX_FNAME];
@@ -213,7 +227,7 @@ namespace ec
 
 		inline long long filesize(const char* utf8file)
 		{
-			wchar_t wsfile[512];
+			wchar_t wsfile[1024];
 			if (!MultiByteToWideChar(ec::strisutf8(utf8file) ? CP_UTF8 : CP_ACP, 0, utf8file, -1, wsfile, sizeof(wsfile) / sizeof(wchar_t)))
 				return -1;
 			struct __stat64 statbuf;
@@ -297,7 +311,7 @@ namespace ec
 			if (!spath || !*spath)
 				return false;
 			char cl = 0;
-			char szt[512] = { '\0', }, *pct;
+			char szt[1024] = { '\0', }, *pct;
 
 			pct = (char*)szt;
 			while (*spath) {
@@ -481,13 +495,13 @@ namespace ec
 		{
 #ifdef _WIN32
 			size_t zn = -1;
-			char szFilter[512];
+			char szFilter[1024];
 			hFind = INVALID_HANDLE_VALUE;
 			memset(&FindFileData, 0, sizeof(FindFileData));
 			zn = snprintf(szFilter, sizeof(szFilter), "%s*.*", utf8path);
 			if(zn >= sizeof(szFilter))
 				return;
-			wchar_t sfile[512];
+			wchar_t sfile[1024];
 			if (MultiByteToWideChar(ec::strisutf8(szFilter) ? CP_UTF8 : CP_ACP, 0, szFilter, -1, sfile, sizeof(sfile) / sizeof(wchar_t)))
 				hFind = FindFirstFileW(sfile, &FindFileData);
 #else
@@ -512,7 +526,7 @@ namespace ec
 #ifdef _WIN32
 		WIN32_FIND_DATAW FindFileData;
 		HANDLE hFind;// = INVALID_HANDLE_VALUE;
-		char _utf8tmp[512];
+		char _utf8tmp[1024];
 #else
 		DIR * dir;
 #endif
