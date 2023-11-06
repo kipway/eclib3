@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update:
+2023.11.4  support root_chain pem format
 2023.7.4   Fix mkr_ClientKeyExchange
 2023.6.26  remove ec:array, fix mkr_ClientHelloMsg compression_methods
 2023.5.13  remove ec::memory
@@ -1483,6 +1484,18 @@ namespace ec
 				if (filerootcert && *filerootcert) {
 					if (!load_certfile(filerootcert, _prootcer))
 						return false;
+					if (!memcmp("-----", _prootcer.data(), 5)) { // pem
+						BIO* bioPub = BIO_new_mem_buf(_prootcer.c_str(), (int)_prootcer.size());
+						X509* px509 = PEM_read_bio_X509(bioPub, nullptr, nullptr, nullptr);
+						BIO_free(bioPub);
+						if (!px509)
+							return false;
+						if (!x509toDer(px509, _prootcer)) {
+							X509_free(px509);
+							return false;;
+						}
+						X509_free(px509);
+					}
 				}
 
 				FILE* pf = fopen(fileprivatekey, "rb");

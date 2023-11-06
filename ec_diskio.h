@@ -3,6 +3,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update
+  2023.10.23 update ec::io::getdiskspace() for linux use statfs::f_bavail
   2023.9.27 add ec::io::rmdir(),update path length from 512 to 1024
 
 io
@@ -346,7 +347,7 @@ namespace ec
 				return 0;
 
 			long long blocksize = diskInfo.f_bsize;
-			unsigned long long  freeDisk = diskInfo.f_bfree * blocksize;
+			unsigned long long  freeDisk = diskInfo.f_bavail * blocksize;
 			freeDisk >>= 20; //MB
 			return (long long)freeDisk;
 		}
