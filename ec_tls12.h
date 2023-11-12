@@ -103,7 +103,7 @@ namespace ec
 		using ctype = typename _strOut::value_type;
 		while (!feof(pf)) {
 			size = fread(stmp, 1, sizeof(stmp), pf);
-			out.assign((const ctype*)stmp, size);
+			out.append((const ctype*)stmp, size);
 		}
 		fclose(pf);
 		return out.size() > 5u;
@@ -137,7 +137,7 @@ namespace ec
 		if (!load_certfile(filecert, cert))
 			return false;
 		X509* px509 = nullptr;
-		if (!memcmp("-----", cert.data(), 5)) { // pem
+		if (strstr(cert.c_str(), "-----BEGIN CERTIFICATE-----")) {
 			BIO* bioPub = BIO_new_mem_buf(cert.data(), (int)cert.size());
 			px509 = PEM_read_bio_X509(bioPub, nullptr, nullptr, nullptr);
 			BIO_free(bioPub);
@@ -1484,8 +1484,8 @@ namespace ec
 				if (filerootcert && *filerootcert) {
 					if (!load_certfile(filerootcert, _prootcer))
 						return false;
-					if (!memcmp("-----", _prootcer.data(), 5)) { // pem
-						BIO* bioPub = BIO_new_mem_buf(_prootcer.c_str(), (int)_prootcer.size());
+					if (strstr(_prootcer.c_str(),"-----BEGIN CERTIFICATE-----")) { // pem
+						BIO* bioPub = BIO_new_mem_buf(_prootcer.data(), (int)_prootcer.size());
 						X509* px509 = PEM_read_bio_X509(bioPub, nullptr, nullptr, nullptr);
 						BIO_free(bioPub);
 						if (!px509)
@@ -1510,8 +1510,8 @@ namespace ec
 				EVP_PKEY* pevppk = nullptr;
 				X509* px509 = nullptr;
 				do {
-					if (!memcmp("-----", _pcer.data(), 5)) { // pem
-						BIO* bioPub = BIO_new_mem_buf(_pcer.c_str(), (int)_pcer.size());
+					if (strstr(_pcer.c_str(), "-----BEGIN CERTIFICATE-----")) { // pem
+						BIO* bioPub = BIO_new_mem_buf(_pcer.data(), (int)_pcer.size());
 						px509 = PEM_read_bio_X509(bioPub, nullptr, nullptr, nullptr);
 						BIO_free(bioPub);
 						if (!px509)

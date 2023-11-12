@@ -55,6 +55,7 @@ namespace ec {
 #if (0 != EC_AIOSRV_TLS)
 			tls::srvca _ca;  // certificate
 #endif
+			int64_t _mstimelastdelete = 0;//上次扫描删除连接的时间
 		public:
 			netserver(ec::ilog* plog) : netserver_(plog)
 				, _sndbufblks(EC_AIO_SNDBUF_BLOCKSIZE - EC_ALLOCTOR_ALIGN, EC_AIO_SNDBUF_HEAPSIZE / EC_AIO_SNDBUF_BLOCKSIZE)
@@ -85,8 +86,26 @@ namespace ec {
 #endif
 			void runtime(int waitmsec, int64_t& currentmsec)
 			{
+				if (!currentmsec)
+					currentmsec = ec::mstime();
 				timerjob(currentmsec);//定时任务，维持上游连接和发送心跳消息
 				netserver_::runtime_(waitmsec);
+
+				if (llabs(currentmsec - _mstimelastdelete) >= 1000) { //每秒扫描一次错误会话
+					_mstimelastdelete = currentmsec;
+					time_t curt = ::time(nullptr);
+					ec::vector<int> dels;
+					dels.reserve(32);
+					for (const auto& i : _mapsession) {
+						if (i->_time_error && llabs(curt - i->_time_error) >= 5) {
+							dels.push_back(i->_fd);
+						}
+					}
+					for (const auto& fd : dels) {
+						_plog->add(CLOG_DEFAULT_INF, "close fd(%d) as unkown or disable protocol", fd);
+						closefd(fd);
+					}
+				}
 			}
 
 			psession getsession(int fd)
@@ -227,6 +246,17 @@ namespace ec {
 			}
 
 		protected:
+			
+			/**
+			 * @brief 是否容许协议
+			 * @param fd 
+			 * @param nproco 
+			 * @return 返回true可正常升级协议，否则不响应。
+			*/
+			virtual bool EnableProtocol(int fd, int nproco) {
+				return true;
+			}
+
 			virtual void onprotocol(int fd, int nproco) {};
 
 			/**
@@ -295,6 +325,10 @@ namespace ec {
 				if ((ec::strineq("head", (const char*)pu, 4)
 					|| ec::strineq("get", (const char*)pu, 3))
 					) { //update http
+					if (!EnableProtocol(fd, EC_AIO_PROC_HTTP)) {
+						(*pi)->_time_error = ::time(nullptr);//设置延迟断开开始时间
+						return 0; //不应答
+					}
 					ec::http::package r;
 					if (r.parse((const char*)pu, size) < 0)
 						return -1;
@@ -350,6 +384,9 @@ namespace ec {
 				psession pss = nullptr;
 				if (!_mapsession.get(kfd, pss))
 					return -1;
+				if (pss->_time_error) {
+					return EC_AIO_MSG_NUL;
+				}
 				ec::bytes msg;
 				int msgtype = pss->onrecvbytes(pdata, size, _plog, &msg);
 				if (EC_AIO_PROC_TCP == pss->_protocol && EC_AIO_MSG_TCP == msgtype) {

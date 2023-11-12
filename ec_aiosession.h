@@ -170,6 +170,7 @@ namespace ec {
 			char _peerip[48];
 			uint16_t _peerport;
 			uint32_t _epollevents;//epoll events
+			time_t   _time_error; //延迟断开的开始时间
 		private:
 			ssext_data* _pextdata; //application session extension data
 		public:
@@ -189,6 +190,7 @@ namespace ec {
 				, _sndbuf(EC_AIO_SNDBUF_MAXSIZE, pblkallocator)
 				, _peerport(0)
 				, _epollevents(0)
+				, _time_error(0)
 				, _pextdata(nullptr)
 			{
 				memset(_peerip, 0, sizeof(_peerip));
@@ -212,6 +214,7 @@ namespace ec {
 				_peerport = v._peerport;
 				_epollevents = v._epollevents;
 				_pextdata = v._pextdata;
+				_time_error = v._time_error;
 				v._pextdata = nullptr;
 				memcpy(_peerip, v._peerip, sizeof(_peerip));
 			}

@@ -34,7 +34,9 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #include "ec_base64.h"
 #include "dtoa_milo.h"
 
+#ifndef _WIN32
 uint32_t inet_network(const char* cp);
+#endif
 namespace ec
 {
 	class json // parse json object, fast no copy
@@ -406,7 +408,7 @@ namespace ec
 			return true;
 		}
 
-		template<typename _VAL>
+		template<typename _VAL = uint32_t>
 		void get_jipv4(const char* key, _VAL& hostv)
 		{
 			char sip[40] = { 0 };

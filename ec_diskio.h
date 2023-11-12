@@ -245,7 +245,7 @@ namespace ec
 				return false;
 			if (lsize)
 				pout->reserve(pout->size() + (size_t)lsize + 8);
-			else if(fsize > offset)
+			else
 				pout->reserve(pout->size() + static_cast<size_t>(fsize - offset) + 8);
 
 			wchar_t sfile[512];
@@ -455,7 +455,7 @@ namespace ec
 				return false;
 			if (lsize)
 				pout->reserve(pout->size() + (size_t)lsize + 8);
-			else if (fsize > offset)
+			else
 				pout->reserve(pout->size() + static_cast<size_t>(fsize - offset) + 8);
 
 			int nfd = ::open(utf8file, O_RDONLY, S_IROTH | S_IRUSR | S_IRGRP);

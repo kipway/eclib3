@@ -386,7 +386,6 @@ namespace ec {
 #endif
 				if (_downpos + lread > _sizefile)
 					lread = _sizefile - _downpos;
-				sbuf.reserve((size_t)lread);
 				if (!io::lckread(_downfilename.c_str(), &sbuf, _downpos, lread, _sizefile))
 					return false;
 				if (sbuf.empty()) {
