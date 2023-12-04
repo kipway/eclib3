@@ -5,7 +5,8 @@ eclib for sample Expression calculation class, new version. support functions an
 
 \author	jiangyong
 \email  kipway@outlook.com
-\update 2023.5.15
+\update 
+  2023.11.24 Fix:修正函数后减号误识别为负号的BUG
 
 eclib Copyright (c) 2017-2023, kipway
 source repository : https://github.com/kipway/eclib
@@ -525,6 +526,7 @@ namespace ec
 						}
 						vout.push_back(pfun);
 						skey.clear();
+						prenode = node_fun;
 					}
 					else {
 						optstk.push(new node_left_());

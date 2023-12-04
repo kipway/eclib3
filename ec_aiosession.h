@@ -67,6 +67,10 @@ You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2
 #ifndef EC_UDP_FRM_INBUF_SIZE
 #define EC_UDP_FRM_INBUF_SIZE 64
 #endif
+
+#ifndef NETIO_BPS_ITEMS
+#define NETIO_BPS_ITEMS 10 //秒流量计算粒度，每秒数据数。
+#endif
 namespace ec {
 	namespace aio {
 
@@ -151,6 +155,39 @@ namespace ec {
 				return "ssext_data";
 			}
 		};
+
+		struct t_bps
+		{
+			struct t_i {
+				int64_t _t;
+				int64_t _v;
+			};
+			t_bps() {
+				memset(&_tv, 0, sizeof(_tv));
+			}
+			t_i _tv[NETIO_BPS_ITEMS]; // 0->NETIO_BPS_ITEMS-1对应的按照时间间隔的数据，最近的在0
+			void add(int64_t t, int64_t v) //添加最新的到最前面
+			{
+				if (llabs(t - _tv[0]._t) <= 1000 / NETIO_BPS_ITEMS) {
+					_tv[0]._v += v;
+				}
+				else {
+					memmove(&_tv[1], &_tv[0], sizeof(t_i) * (NETIO_BPS_ITEMS - 1));
+					_tv[0]._t = t;
+					_tv[0]._v = v;
+				}
+			}
+			int64_t getBps(int64_t t)
+			{
+				int64_t v = 0;
+				for (auto i = 0; i < NETIO_BPS_ITEMS; i++) {
+					if (llabs(t - _tv[i]._t) > 1000)
+						break;
+					v += _tv[i]._v;
+				}
+				return v;
+			}
+		};
 		class session
 		{
 		public:
@@ -171,11 +208,13 @@ namespace ec {
 			uint16_t _peerport;
 			uint32_t _epollevents;//epoll events
 			time_t   _time_error; //延迟断开的开始时间
+			t_bps   _bpsRcv; //接受秒流量
+			t_bps   _bpsSnd; //发送秒流量
 		private:
 			ssext_data* _pextdata; //application session extension data
 		public:
 			_USE_EC_OBJ_ALLOCATOR
-			session(blk_alloctor<>* pblkallocator, int fd, int fdlisten = -1)
+				session(blk_alloctor<>* pblkallocator, int fd, int fdlisten = -1)
 				: _keyid(fd)
 				, _fd(fd)
 				, _fdlisten(fdlisten)
@@ -215,8 +254,20 @@ namespace ec {
 				_epollevents = v._epollevents;
 				_pextdata = v._pextdata;
 				_time_error = v._time_error;
+				v._bpsRcv = _bpsRcv;
+				v._bpsSnd = _bpsSnd;
 				v._pextdata = nullptr;
 				memcpy(_peerip, v._peerip, sizeof(_peerip));
+			}
+
+			inline int64_t getRcvBps()
+			{
+				return _bpsRcv.getBps(ec::mstime());
+			}
+
+			inline int64_t getSndBps()
+			{
+				return _bpsSnd.getBps(ec::mstime());
 			}
 
 			void setextdata(ssext_data* pdata)
@@ -247,7 +298,6 @@ namespace ec {
 			*/
 			virtual int onrecvbytes(const void* pdata, size_t size, ec::ilog* plog, ec::bytes* pmsgout)
 			{
-				_allrecv += size;
 				pmsgout->clear();
 				pmsgout->append(pdata, size);
 				return pmsgout->empty() ? EC_AIO_MSG_NUL : _msgtype;
@@ -256,7 +306,6 @@ namespace ec {
 			// return -1:error; or (int)size
 			virtual int sendasyn(const void* pdata, size_t size, ec::ilog* plog)
 			{
-				_allsend += size;
 				return _sndbuf.append((const uint8_t*)pdata, size) ? (int)size : -1;
 			}
 
@@ -277,6 +326,31 @@ namespace ec {
 			virtual void setHttpDownFile(const char* sfile, long long pos, long long filelen) {};
 			virtual bool hasSendJob() { return false; };
 			virtual void onUdpSendCount(int64_t numfrms, int64_t numbytes) {};
+
+			virtual const char* ProtocolName(int nprotoocl) {
+				const char* sr = "";
+				switch (nprotoocl) {
+				case EC_AIO_PROC_TCP:
+					sr = "TCP";
+					break;
+				case EC_AIO_PROC_TLS:
+					sr = "TLS";
+					break;
+				case EC_AIO_PROC_HTTP:
+					sr = "HTTP";
+					break;
+				case EC_AIO_PROC_HTTPS:
+					sr = "HTTPS";
+					break;
+				case EC_AIO_PROC_WS:
+					sr = "WS";
+					break;
+				case EC_AIO_PROC_WSS:
+					sr = "WSS";
+					break;
+				}
+				return sr;
+			}
 		};
 
 		typedef session* psession;

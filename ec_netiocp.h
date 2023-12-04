@@ -254,7 +254,7 @@ namespace ec {
 			*/
 			virtual psession getSession(int kfd) = 0;
 
-			virtual void onSendtoFailed(int fd, const struct sockaddr* paddr, int addrlen, const void* pdata, size_t datasize, int errcode) {};
+			virtual void onSendtoFailed(int kfd, const struct sockaddr* paddr, int addrlen, const void* pdata, size_t datasize, int errcode) {};
 		protected:
 			int setsendbuf(int fd, int n)
 			{
@@ -1049,6 +1049,11 @@ namespace ec {
 						closefd(pfd->kfd);
 					}
 					return 0;
+				}
+				psession pss = getSession(pol->kfd);
+				if (pss) {
+					pss->_allsend += dwBytes;
+					pss->_bpsSnd.add(ec::mstime(), dwBytes);
 				}
 #ifdef _DEBUG
 				_plog->add(CLOG_DEFAULT_ALL, "fd(%d) op_write completed size %u.", pol->kfd, dwBytes);

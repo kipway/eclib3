@@ -111,7 +111,7 @@ namespace ec {
 			*/
 			virtual psession getSession(int kfd) = 0;
 
-			virtual void onSendtoFailed(int fd, const struct sockaddr* paddr, int addrlen, const void* pdata, size_t datasize, int errcode) {};
+			virtual void onSendtoFailed(int kfd, const struct sockaddr* paddr, int addrlen, const void* pdata, size_t datasize, int errcode) {};
 		protected:
 			inline int setsendbuf(int fd, int n)
 			{
@@ -525,7 +525,7 @@ namespace ec {
 #ifdef _DEBUG
 							_plog->add(CLOG_DEFAULT_ALL, "fd(%d) received %d bytes", evt.data.fd, nr);
 #endif
-							if (onReceived(evt.data.fd, _recvtmp, nr) < 0) {
+							if (nr > 0 && onReceived(evt.data.fd, _recvtmp, nr) < 0) {
 								closefd(evt.data.fd);
 								return;
 							}
@@ -618,6 +618,10 @@ namespace ec {
 					if (ns < (int)(zlen))
 						break;
 					pd = pss->_sndbuf.get(zlen);
+				}
+				if (nsnd) {
+					pss->_allsend += nsnd;
+					pss->_bpsSnd.add(ec::mstime(), nsnd);
 				}
 				return ns < 0 ? -1 : nsnd;
 			}

@@ -123,9 +123,9 @@ public:
 		FILE* pf = ec::io::fopen(_sfdfile.c_str(), "rt");
 		if (pf) {
 			char sid[40] = { 0 };
-			fread(sid, 1, sizeof(sid) - 1u, pf);
+			if(fread(sid, 1, sizeof(sid) - 1u, pf) > 0)
+				_nextfd = atoi(sid);
 			fclose(pf);
-			_nextfd = atoi(sid);
 			if (_nextfd < 0)
 				_nextfd = 0;
 		}

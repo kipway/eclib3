@@ -246,14 +246,14 @@ namespace ec {
 			}
 
 		protected:
-			
+
 			/**
-			 * @brief 是否容许协议
-			 * @param fd 
-			 * @param nproco 
-			 * @return 返回true可正常升级协议，否则不响应。
+			 * @brief 是否容许协议接入
+			 * @param fdlisten 监听端口
+			 * @param nproco 具体协议如 EC_AIO_PROC_HTTP 等
+			 * @return 返回true可正常升级协议，否则不响应，延迟断开
 			*/
-			virtual bool EnableProtocol(int fd, int nproco) {
+			virtual bool EnableProtocol(int fdlisten, int nproco) {
 				return true;
 			}
 
@@ -306,9 +306,20 @@ namespace ec {
 					if (!_ca._pcer.data() || !_ca._pcer.size() || !_ca._pRsaPub || !_ca._pRsaPrivate) {
 						if (_plog)
 							_plog->add(CLOG_DEFAULT_MOR, "fd(%d) update TLS1.2 protocol failed, no server certificate", fd);
-						return -2;// not support
+						(*pi)->_time_error = ::time(nullptr);//设置延迟断开开始时间
+						return 0; //不应答,延迟断开
+					}
+					if (!EnableProtocol((*pi)->_fdlisten, EC_AIO_PROC_TLS)) {
+						(*pi)->_time_error = ::time(nullptr);//设置延迟断开开始时间
+						return 0; //不应答,延迟断开
 					}
 					ec::tls::srvca* pCA = getCA((*pi)->_fdlisten);
+					if (!pCA) {
+						if (_plog)
+							_plog->add(CLOG_DEFAULT_MOR, "fd(%d) update TLS1.2 protocol getCA failed.", fd);
+						(*pi)->_time_error = ::time(nullptr);//设置延迟断开开始时间
+						return 0; //不应答,延迟断开
+					}
 					psession ptls = new session_tls(fd, std::move(**pi), pCA->_pcer.data(), pCA->_pcer.size(),
 						pCA->_prootcer.data(), pCA->_prootcer.size(), &pCA->_csRsa, pCA->_pRsaPrivate, _plog);
 					if (!ptls)
@@ -325,13 +336,13 @@ namespace ec {
 				if ((ec::strineq("head", (const char*)pu, 4)
 					|| ec::strineq("get", (const char*)pu, 3))
 					) { //update http
-					if (!EnableProtocol(fd, EC_AIO_PROC_HTTP)) {
-						(*pi)->_time_error = ::time(nullptr);//设置延迟断开开始时间
-						return 0; //不应答
-					}
 					ec::http::package r;
 					if (r.parse((const char*)pu, size) < 0)
 						return -1;
+					if (r.parse((const char*)pu, size) < 0 || !EnableProtocol((*pi)->_fdlisten, EC_AIO_PROC_HTTP)) {
+						(*pi)->_time_error = ::time(nullptr);//设置延迟断开开始时间
+						return 0; //不应答,延迟断开
+					}
 					psession phttp = new session_http(std::move(**pi));
 					if (!phttp)
 						return -1;
@@ -356,8 +367,10 @@ namespace ec {
 					|| ec::strineq("get", (const char*)pu, 3))
 					) { //update http
 					ec::http::package r;
-					if (r.parse((const char*)pu, size) < 0)
-						return -1;
+					if (r.parse((const char*)pu, size) < 0 || !EnableProtocol((*pi)->_fdlisten, EC_AIO_PROC_HTTPS)) {
+						(*pi)->_time_error = ::time(nullptr);//设置延迟断开开始时间
+						return 0; //不应答,延迟断开
+					}
 					psession phttp = new session_https(std::move(*((session_tls*)*pi)));
 					if (!phttp)
 						return -1;
@@ -387,6 +400,8 @@ namespace ec {
 				if (pss->_time_error) {
 					return EC_AIO_MSG_NUL;
 				}
+				pss->_allrecv += size;
+				pss->_bpsRcv.add(ec::mstime(), (int64_t)size);
 				ec::bytes msg;
 				int msgtype = pss->onrecvbytes(pdata, size, _plog, &msg);
 				if (EC_AIO_PROC_TCP == pss->_protocol && EC_AIO_MSG_TCP == msgtype) {
