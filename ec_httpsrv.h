@@ -4,6 +4,7 @@
 \author	jiangyong
 \email  kipway@outlook.com
 \update 2020-5-30
+  2023-12-25 fix http Security vulnerability
   2023-5-30 support multi http root path
   2023-5-23 update http rang download big file
   2023-5-21 support big file download
@@ -332,7 +333,7 @@ namespace ec
 				url2utf8(sfile.c_str(), utf8);
 				if (utf8.size() < 1)
 					return false;
-				if (utf8[0] == '.' || (utf8.size() > 1 && utf8[1] == '.')) {
+				if (strstr(utf8.c_str(), "..")) {
 					return httpwrite(ucid, &http, 404, "not found!", html_400, strlen(html_400), "text/html");
 				}
 				sfile = _pathhttp;

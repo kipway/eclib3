@@ -6,6 +6,7 @@ Asynchronous session base class
 
 \author  jiangyong
 \update
+  2023-12-13 增加会话连接消息处理均衡
   2023-5-21 update for http download big file
 
 eclib 3.0 Copyright (c) 2017-2023, kipway
@@ -198,6 +199,7 @@ namespace ec {
 			int _protocol;
 			int _readpause;
 			int _msgtype;
+			int _lastappmsg;//上次产生应用消息 0：没有； 1：产生
 			uint32_t _udata;
 			uint64_t _allsend;
 			uint64_t _allrecv;
@@ -222,6 +224,7 @@ namespace ec {
 				, _protocol(EC_AIO_PROC_TCP)
 				, _readpause(0)
 				, _msgtype(EC_AIO_MSG_TCP)
+				, _lastappmsg(0)
 				, _udata(0)
 				, _allsend(0)
 				, _allrecv(0)
@@ -244,6 +247,8 @@ namespace ec {
 				_status = v._status;
 				_protocol = v._protocol;
 				_readpause = v._readpause;
+				_msgtype = v._msgtype;
+				_lastappmsg = v._lastappmsg;
 				_udata = v._udata;
 				_allsend = v._allsend;
 				_allrecv = v._allrecv;

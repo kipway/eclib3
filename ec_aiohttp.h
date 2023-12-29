@@ -5,7 +5,8 @@ eclib3 AIO
 Asynchronous http/ws session
 
 \author  jiangyong
-\update 
+\update
+  2023-12-13 增加会话连接消息处理均衡
   2023-8-10 update DoUpgradeWebSocket() logout infomation
   2023-5-21 update for http download big file
 
@@ -350,14 +351,19 @@ namespace ec {
 		public:
 			virtual int onrecvbytes(const void* pdata, size_t size, ec::ilog* plog, ec::bytes* pmsgout)
 			{
+				_lastappmsg = 0;
 				int nr = DoReadData(_fd, (const char*)pdata, size, pmsgout, plog, _rbuf);
 				if (he_failed == nr)
 					return EC_AIO_MSG_ERR;
 				else if (he_ok == nr) {
-					if (PROTOCOL_HTTP == _nws)
+					if (PROTOCOL_HTTP == _nws) {
+						_lastappmsg = 1;
 						return EC_AIO_MSG_HTTP;
-					else if (PROTOCOL_WS == _nws)
+					}
+					else if (PROTOCOL_WS == _nws) {
+						_lastappmsg = 1;
 						return EC_AIO_MSG_WS;
+					}
 					return EC_AIO_MSG_NUL;
 				}
 				return EC_AIO_MSG_NUL; //wait

@@ -7,6 +7,8 @@
 * class ec::aio::netserver
 
 * @update
+	2023-12-21 增加总收发流量和总收发秒流量
+	2023-12-13 增加连接会话消息处理均衡,每个连接每次解析和处理一个消息。
 	2023-6-16 add tcp keepalive
 	2023-6-7 fix netserver::tcpconnect(uint16_t port, const char* sip) connect localhost failed in windows while sip==nul
 	2023-6-6  增加可持续fd
@@ -56,6 +58,10 @@ namespace ec {
 			tls::srvca _ca;  // certificate
 #endif
 			int64_t _mstimelastdelete = 0;//上次扫描删除连接的时间
+			uint64_t _allsend = 0 ;//总发送
+			uint64_t _allrecv = 0;//总接收
+			t_bps   _bpsRcv; //总接受秒流量
+			t_bps   _bpsSnd; //总发送秒流量
 		public:
 			netserver(ec::ilog* plog) : netserver_(plog)
 				, _sndbufblks(EC_AIO_SNDBUF_BLOCKSIZE - EC_ALLOCTOR_ALIGN, EC_AIO_SNDBUF_HEAPSIZE / EC_AIO_SNDBUF_BLOCKSIZE)
@@ -88,9 +94,9 @@ namespace ec {
 			{
 				if (!currentmsec)
 					currentmsec = ec::mstime();
-				timerjob(currentmsec);//定时任务，维持上游连接和发送心跳消息
-				netserver_::runtime_(waitmsec);
-
+				timerjob(currentmsec);
+				int nmsg = doRecvBuffer(); //处理会话接收缓冲中未处理完的消息。
+				netserver_::runtime_(nmsg > 0 ? 0 : waitmsec);
 				if (llabs(currentmsec - _mstimelastdelete) >= 1000) { //每秒扫描一次错误会话
 					_mstimelastdelete = currentmsec;
 					time_t curt = ::time(nullptr);
@@ -246,6 +252,52 @@ namespace ec {
 			}
 
 		protected:
+			/**
+			 * @brief 处理会话接收缓冲中可能分离出的消息，返回处理的消息数
+			 * @return 返回处理的消息数; 
+			*/
+			int doRecvBuffer()
+			{
+				int msgtype, n = 0;
+				ec::bytes msg;
+				ec::vector<int> dels;
+				dels.reserve(32);
+				for (const auto& i : _mapsession) {
+					if (i->_time_error)
+						continue;
+					msgtype = i->onrecvbytes(nullptr, 0, _plog, &msg);
+					if (msgtype > EC_AIO_MSG_NUL) {
+						if (domessage(i->_fd, msg, msgtype) < 0 || postsend(i->_fd) < 0) {
+							dels.push_back(i->_fd);
+						}
+						else {
+							++n;
+							_plog->add(CLOG_DEFAULT_ALL, "fd(%d) %s parse one recvbuf msgtype = %d success",
+								i->_fd,	i->ProtocolName(i->_protocol), msgtype);
+						}
+						msg.clear();
+					}
+				}
+				for (const auto& fd : dels) {
+					_plog->add(CLOG_DEFAULT_INF, "close fd(%d) at runrecvbuf failed", fd);
+					closefd(fd);
+				}
+				return n;
+			}
+
+			/**
+			 * @brief size can receive ,use for flowctrl
+			 * @param pss
+			 * @return >0 size can receive;  0: pause read
+			*/
+			virtual size_t  sizeCanRecv(psession pss) {
+				
+				if (!pss->_lastappmsg || pss->_rbuf.empty())
+					return EC_AIO_READONCE_SIZE;
+				_plog->add(CLOG_DEFAULT_ALL, "fd(%d) %s pause reading for task balancing.", 
+					pss->_fd, pss->ProtocolName(pss->_protocol));
+				return 0;
+			};
 
 			/**
 			 * @brief 是否容许协议接入
@@ -394,6 +446,10 @@ namespace ec {
 			*/
 			virtual int onReceived(int kfd, const void* pdata, size_t size)
 			{
+				int64_t mscurtime = ec::mstime();
+				_allrecv += size;
+				_bpsRcv.add(mscurtime, (int64_t)size);
+
 				psession pss = nullptr;
 				if (!_mapsession.get(kfd, pss))
 					return -1;
@@ -401,7 +457,7 @@ namespace ec {
 					return EC_AIO_MSG_NUL;
 				}
 				pss->_allrecv += size;
-				pss->_bpsRcv.add(ec::mstime(), (int64_t)size);
+				pss->_bpsRcv.add(mscurtime, (int64_t)size);
 				ec::bytes msg;
 				int msgtype = pss->onrecvbytes(pdata, size, _plog, &msg);
 				if (EC_AIO_PROC_TCP == pss->_protocol && EC_AIO_MSG_TCP == msgtype) {
@@ -422,13 +478,9 @@ namespace ec {
 					msgtype = pss->onrecvbytes(nullptr, 0, _plog, &msg);
 				}
 #endif
-				while (msgtype > EC_AIO_MSG_NUL) {
+				if (msgtype > EC_AIO_MSG_NUL) { //只处理一个消息,剩下得在doRecvBuffer中处理。
 					if (domessage(pss->_fd, msg, msgtype) < 0)
 						return -1;
-					if (postsend(kfd) < 0)
-						return -1;
-					msg.clear();
-					msgtype = pss->onrecvbytes(nullptr, 0, _plog, &msg);
 				}
 				if (msgtype == EC_AIO_MSG_ERR) {
 					_plog->add(CLOG_DEFAULT_ERR, "fd(%d) read error message.", pss->_fd);
@@ -461,6 +513,18 @@ namespace ec {
 				ec::strlcpy(pss->_peerip, sip, sizeof(pss->_peerip));
 				pss->_peerport = port;
 				_mapsession.set(fd, pss);
+			}
+
+			virtual void onSendCompleted(int kfd, size_t size)
+			{
+				_allsend += size;
+				_bpsSnd.add(ec::mstime(), (int64_t)size);
+			}
+
+			virtual int onReceivedFrom(int kfd, const void* pdata, size_t size, const struct sockaddr* addrfrom, int addrlen) {				
+				_allrecv += size;
+				_bpsRcv.add(ec::mstime(), (int64_t)size);
+				return 0;
 			}
 		};
 	}//namespace aio

@@ -4,6 +4,7 @@
 * 
 * @author jiangyong
 * @update
+	2023-12-21 增加总收发流量和总收发秒流量
 	2023-6-15 add tcp keepalive
 	2023-6-6  增加可持续fd, update closefd() 可选通知
     2023-5-21 update for download big http file
@@ -112,6 +113,7 @@ namespace ec {
 			virtual psession getSession(int kfd) = 0;
 
 			virtual void onSendtoFailed(int kfd, const struct sockaddr* paddr, int addrlen, const void* pdata, size_t datasize, int errcode) {};
+			virtual void onSendCompleted(int kfd, size_t size) {};
 		protected:
 			inline int setsendbuf(int fd, int n)
 			{
@@ -433,6 +435,7 @@ namespace ec {
 					numsnd++;
 				} while (!pfrms->empty() && numsnd < 16 && nbytes < 1024 * 32);
 				pss->onUdpSendCount(numsnd, nbytes);
+				onSendCompleted(kfd, nbytes);
 			}
 
 			char udpbuf_[1024 * 64] = { 0 };
@@ -622,6 +625,7 @@ namespace ec {
 				if (nsnd) {
 					pss->_allsend += nsnd;
 					pss->_bpsSnd.add(ec::mstime(), nsnd);
+					onSendCompleted(fd, nsnd);
 				}
 				return ns < 0 ? -1 : nsnd;
 			}

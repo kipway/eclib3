@@ -6,6 +6,7 @@ http/ws server
 \author  jiangyong
 
 \update 
+  2023-12-25 fix http Security vulnerability
   2023-5-30 support multi http root path
   2023-5-23 update http rang download big file
   2023-5-21 update http download big file
@@ -318,7 +319,7 @@ namespace ec {
 				url2utf8(sfile.c_str(), utf8);
 				if (utf8.size() < 1)
 					return false;
-				if (utf8[0] == '.' || (utf8.size() > 1 && utf8[1] == '.')) {
+				if (strstr(utf8.c_str(),"..")) {
 					return httpwrite(fd, &http, 404, "not fund", html_404, strlen(html_404), "text/html");
 				}
 				sfile = (const char*)_pathhttp;

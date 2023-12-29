@@ -6,6 +6,7 @@ Asynchronous https/wss session
 
 \author  jiangyong
 \update
+  2023-12-13 增加会话连接消息处理均衡
   2023-5-21 update for http download big file
 
 eclib 3.0 Copyright (c) 2017-2023, kipway
@@ -47,14 +48,19 @@ namespace ec {
 					if (EC_AIO_MSG_TCP != nr)
 						return nr;
 				}
+				_lastappmsg = 0;
 				nr = DoReadData(_fd, (const char*)pmsgout->data(), pmsgout->size(), pmsgout, plog, _rbuf);
 				if (he_failed == nr)
 					return EC_AIO_MSG_ERR;
 				else if (he_ok == nr) {
-					if (PROTOCOL_HTTP == _nws)
+					if (PROTOCOL_HTTP == _nws) {
+						_lastappmsg = 1;
 						return EC_AIO_MSG_HTTP;
-					else if (PROTOCOL_WS == _nws)
+					}
+					else if (PROTOCOL_WS == _nws) {
+						_lastappmsg = 1;
 						return EC_AIO_MSG_WS;
+					}
 					return EC_AIO_MSG_NUL;
 				}
 				return EC_AIO_MSG_NUL; //wait

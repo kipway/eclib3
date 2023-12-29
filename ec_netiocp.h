@@ -3,6 +3,7 @@
 * base net server class use IOCP for windows
 * @author jiangyong
 * @update
+	2023-12-21 增加总收发流量和总收发秒流量
 	2023-6-15 add tcp keepalive
 	2023-6-6  增加可持续fd, update closefd() 可选通知
     2023-5-21 for http download big file
@@ -255,6 +256,7 @@ namespace ec {
 			virtual psession getSession(int kfd) = 0;
 
 			virtual void onSendtoFailed(int kfd, const struct sockaddr* paddr, int addrlen, const void* pdata, size_t datasize, int errcode) {};
+			virtual void onSendCompleted(int kfd, size_t size) {};
 		protected:
 			int setsendbuf(int fd, int n)
 			{
@@ -434,7 +436,7 @@ namespace ec {
 				struct sockaddr* paddr = netaddr.getsockaddr(&addrlen);
 				if (!paddr)
 					return -1;
-				t_fd tf{ 0, 0, 0, 0, 0 };
+				t_fd tf{ 0, 0, INVALID_SOCKET, 0, 0 ,0 };
 				tf.sa_family = netaddr.sa_family();
 				int fdl = bind_listen(paddr, addrlen, tf, ipv6only);
 				if (fdl < 0) {
@@ -463,7 +465,7 @@ namespace ec {
 				struct sockaddr* paddr = netaddr.getsockaddr(&addrlen);
 				if (!paddr)
 					return -1;
-				t_fd tf{ 0,0,0,0,0 };
+				t_fd tf{ 0,0,INVALID_SOCKET,0,0, 0 };
 				tf.sa_family = netaddr.sa_family();
 				int fdl = create_udp(paddr, addrlen, tf);
 
@@ -1050,6 +1052,7 @@ namespace ec {
 					}
 					return 0;
 				}
+				onSendCompleted(pol->kfd, (size_t)dwBytes);
 				psession pss = getSession(pol->kfd);
 				if (pss) {
 					pss->_allsend += dwBytes;
@@ -1077,6 +1080,7 @@ namespace ec {
 					}
 					return 0;
 				}
+				onSendCompleted(pol->kfd, (size_t)dwBytes);
 #ifdef _DEBUG
 				_plog->add(CLOG_DEFAULT_ALL, "fd(%d) op_sendto completed size %u.", pol->kfd, dwBytes);
 #endif

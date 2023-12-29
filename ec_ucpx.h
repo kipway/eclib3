@@ -60,6 +60,7 @@ using seqno_t = uint64_t;
 #define FRMCMD_HRT  20 //心跳包
 #define FRMCMD_SYN  21 //请求连接,客户端发送
 #define FRMCMD_SYNR 22 //服务端连接应答,分配一个SSID
+#define FRMCMD_SYN2 27 //重发请求连接,客户端发送，还是应答一个FRMCMD_SYNR, 2023-11-24增加用于增强不稳定网络连接成功率
 #define FRMCMD_DAT  30 //数据包
 #define FRMCMD_DATR 31 //重发的数据包
 #define FRMCMD_ACK  32 //数据确认包seqno
@@ -802,6 +803,7 @@ namespace ec {
 			ec::vector<seqno_t> _seqnos;//重复使用的多seqno确认处理缓冲区
 		public:
 			int _sstype; //会话类型; 0接入; 1连出
+			int _num_reconnect = 0; //重新请求连接次数
 			int64_t  _time_create; //创建时间,1970-1-1的GMT毫秒数
 			int64_t  _time_lastread; //最后一次接收报文时间,1970-1-1的GMT毫秒数
 			int64_t  _time_lastsend; //最后一次发送报文时间,1970-1-1的GMT毫秒数
@@ -1160,9 +1162,9 @@ namespace ec {
 					numSnd = static_cast<uint32_t>(i->getnxtsndno() - 1);
 					numReSnd = static_cast<uint32_t>(i->getresndcount());
 					numSndbuf = (uint32_t)i->sndbufsize(&diffno);
-					nl = snprintf(sl, sizeof(sl), "%08X  %8u  %8u  %7.3f  %8u  %9u  %8d\n", i->get_ssid(), numSnd, numReSnd,
+					nl = snprintf(sl, sizeof(sl), "%08X  %8u  %8u  %7.3f  %8ju  %9u  %8d\n", i->get_ssid(), numSnd, numReSnd,
 						numSnd ? (100.0 * static_cast<double>(numReSnd)) / static_cast<double>(numSnd) : 0,
-						i->getnxtrcvno() - 1, numSndbuf, diffno);
+						(uint64_t)(i->getnxtrcvno() - 1), numSndbuf, diffno);
 					info.append(sl, nl);
 					if (info.size() > 1024 * 7) {
 						_plog->append(CLOG_DEFAULT_INF, "%s", info.c_str());
@@ -1386,16 +1388,16 @@ namespace ec {
 					}
 					return 0;
 				}
-				if (FRMCMD_SYN == pkg._frmcmd) { //连接握手请求,作为服务端
+				if (FRMCMD_SYN == pkg._frmcmd || FRMCMD_SYN2 == pkg._frmcmd) { //连接握手请求(和重发来连接),作为服务端
 					if (pkg.parsepkg((void*)pfrm, size) < 0) {
-						_plog->add(CLOG_DEFAULT_ERR, "fd(%d) read FRMCMD_SYN parsepkg failed", fd);
+						_plog->add(CLOG_DEFAULT_ERR, "fd(%d) read %s parsepkg failed", fd, FRMCMD_SYN == pkg._frmcmd ? "FRMCMD_SYN" : "FRMCMD_SYN2");
 						return 0;
 					}
 					if (pkg._datasize != 16) {
 						char smsg[2048];
 						smsg[0] = 0;
 						ec::bin2view(pfrm, size > 200 ? 200 : size, smsg, sizeof(smsg));
-						_plog->add(CLOG_DEFAULT_ERR, "fd(%d) read FRMCMD_SYN datasize != 16, size %zu\n%s", fd, size, smsg);
+						_plog->add(CLOG_DEFAULT_ERR, "fd(%d) read %s datasize != 16, size %zu\n%s", fd, FRMCMD_SYN == pkg._frmcmd ? "FRMCMD_SYN" : "FRMCMD_SYN2", size, smsg);
 						return 0;
 					}
 					ucpsocket* pss = getbyguid(pkg._data);
@@ -1405,6 +1407,7 @@ namespace ec {
 							int ns = frmpkg::mkfrm(pss->get_ssid(), pkg._seqno, FRMCMD_SYNR, nullptr, 0, frmret, sizeof(frmret));
 							_udpsend(fd, paddr, addrlen, frmret, ns, _udpsend_param, false); //应答一个SYNR握手成功信息,解决主通道握手应答可能丢包的场景
 						}
+						_plog->add(CLOG_DEFAULT_MSG, "fd(%d) recv %s for ssid(%XH)", fd, FRMCMD_SYN == pkg._frmcmd ? "FRMCMD_SYN" : "FRMCMD_SYN2", pss->get_ssid());
 						return 0; //已经存在
 					}
 					
@@ -1421,7 +1424,7 @@ namespace ec {
 					_map.set(pss->get_ssid(), pss);
 					ec::net::socketaddr peeraddr;
 					peeraddr.set(paddr, addrlen);
-					_plog->add(CLOG_DEFAULT_MSG, "fd(%d) new connect ssid(%XH), from udp://%s:%u", fd, unxtid,
+					_plog->add(CLOG_DEFAULT_MSG, "fd(%d) recv %s, new connect ssid(%XH), from udp://%s:%u", fd, FRMCMD_SYN == pkg._frmcmd ? "FRMCMD_SYN" : "FRMCMD_SYN2", unxtid,
 						peeraddr.viewip(), peeraddr.port());
 					onconnect(unxtid, 0); //连入成功
 					return 0;
@@ -1571,6 +1574,17 @@ namespace ec {
 						if(ns >0)
 							i->sendfrm(frmout, ns, _udpsend, _udpsend_param);
 						i->_time_lastsend = curmsec;
+					}
+				}
+
+				//处理请求udp连接超时重发
+				for (auto& i : _mapcon) {
+					if (i->_num_reconnect < 2 && llabs(curmsec - i->_time_create > _resendtime * 6)) { //6倍基础超时重发连接请求。
+						int ns = frmpkg::mkfrm(i->get_ssid(), i->get_ssid(), FRMCMD_SYN2, i->_guid, UCP_GUID_SIZE, frmout, sizeof(frmout));
+						if (ns > 0)
+							i->sendfrm(frmout, ns, _udpsend, _udpsend_param);
+						i->_num_reconnect++;
+						i->_time_create = curmsec; //允许重发两次
 					}
 				}
 			}
